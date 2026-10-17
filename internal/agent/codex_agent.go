@@ -66,9 +66,9 @@ type CodexTokenSaveFunc func(accessToken, refreshToken, idToken string, expiresI
 type codexOAuthRefreshFunc func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error)
 
 // codexRefreshCoordinator bounds recovery OAuth refreshes across agents that may
-// share a credential source. Codex refresh tokens are one-time use, so two
-// profiles pointing at the same token (same fingerprint) must not both consume
-// it. claim admits at most one refresh per fingerprint per window.
+// share a credential source (for example a profile file and ~/.codex/auth.json
+// holding the same token as the Codex CLI). claim admits at most one refresh per
+// credential source per window.
 type codexRefreshCoordinator struct {
 	mu   sync.Mutex
 	last map[string]time.Time
@@ -217,11 +217,16 @@ type CodexAgent struct {
 	// paused.
 	pauseSnapshot atomic.Pointer[CodexPauseState]
 
-	// refreshCoordinator bounds recovery refreshes across agents sharing a
+	// refreshCoordinator rate-limits recovery refreshes across agents sharing a
 	// credential source. refreshTerminalFingerprint is the fingerprint whose
-	// refresh token is known dead (reused/invalid_grant): while it still
+	// refresh token is known dead (reused/invalid_grant/401): while it still
 	// matches the credential source, no further refresh is attempted. A
 	// re-authentication changes the fingerprint and clears this implicitly.
+	//
+	// Both are in-memory, process-lifetime state: a restart forgets them, which
+	// is acceptable. A refreshed token is persisted before use, so on restart the
+	// agent re-reads the latest token from disk; the worst case after a restart is
+	// one redundant refresh of a token that is legitimately expiring.
 	refreshCoordinator         *codexRefreshCoordinator
 	refreshTerminalFingerprint string
 
@@ -616,10 +621,11 @@ func codexAuthRetryBackoff(attempt int) time.Duration {
 // refresh token is still good (issue #147 review).
 //
 // Codex refresh tokens are one-time use, so the refresh is deliberately
-// rate-limited: one attempt per backoff window, coordinated across agents that
-// share a fingerprint, and never repeated once the token is known dead
-// (reused / invalid_grant) until the credential source changes.
-func (a *CodexAgent) tryPausedAuthRecovery() bool {
+// rate-limited: only when the access token is actually expiring, at most once
+// per backoff window, coordinated across agents that share a credential source,
+// and never repeated once the token is known dead (reused / invalid_grant /
+// a 401 rejection).
+func (a *CodexAgent) tryPausedAuthRecovery(ctx context.Context) bool {
 	now := a.currentTime()
 	if a.authRetryAt.IsZero() || now.Before(a.authRetryAt) {
 		return false
@@ -633,20 +639,28 @@ func (a *CodexAgent) tryPausedAuthRecovery() bool {
 		"next_retry_at", a.authRetryAt,
 		"account_id", a.accountID)
 
-	a.tryRecoveryRefresh(now, window)
+	a.tryRecoveryRefresh(ctx, now, window)
 	return true
 }
 
 // tryRecoveryRefresh makes at most one OAuth refresh attempt for the recovery
-// window, unless the refresh token is known dead. A success installs the fresh
-// access token and lifts the pause; a transient failure leaves the pause in
-// place for the next window.
-func (a *CodexAgent) tryRecoveryRefresh(now time.Time, window time.Duration) {
+// window, and only when the access token is actually expiring. A success
+// installs the fresh token but deliberately does NOT lift the pause: only a
+// successful usage poll (or an external credential-file change) resumes
+// polling, so a usage endpoint that keeps rejecting the credential does not
+// restart the backoff - the recovery would otherwise rotate the token every few
+// minutes forever and log the Codex CLI out (issue #147 review, item 1).
+func (a *CodexAgent) tryRecoveryRefresh(ctx context.Context, now time.Time, window time.Duration) {
 	if a.credsRefresh == nil {
 		return
 	}
 	creds := a.credsRefresh()
 	if creds == nil || creds.RefreshToken == "" {
+		return
+	}
+	// Only refresh a token that is actually expiring. Walking the pause path on
+	// a non-token failure (a persistent 403, say) must never rotate tokens.
+	if !creds.IsExpiringSoon(codexTokenRefreshThreshold) {
 		return
 	}
 	if a.store != nil && !a.store.AutoRefreshTokensEnabled() {
@@ -665,8 +679,6 @@ func (a *CodexAgent) tryRecoveryRefresh(now time.Time, window time.Duration) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	newTokens, err := a.refreshCodexToken(ctx, creds.RefreshToken)
 	if err != nil {
 		if isCodexRefreshTerminalError(err) {
@@ -692,8 +704,17 @@ func (a *CodexAgent) tryRecoveryRefresh(now time.Time, window time.Duration) {
 	a.client.SetToken(newTokens.AccessToken)
 	a.lastToken = newTokens.AccessToken
 	a.proactiveRefreshFailures = 0
-	a.resumeAuth()
-	a.logger.Info("Codex auth failure pause lifted - token refreshed during recovery",
+	// Our own write is not an external re-authentication: record the rotated
+	// credential as the one that was failing, so neither credentialsChanged() nor
+	// the tokenRefresh check lifts the pause (and resets the backoff) on the next
+	// tick. Only a successful poll or a genuinely external credential change
+	// resumes polling.
+	a.lastFailedToken = newTokens.AccessToken
+	a.lastFailedFingerprint = a.currentFingerprint()
+	if a.lastFailedFingerprint == "" {
+		a.lastFailedFingerprint = codexTokenFingerprint(newTokens.AccessToken, newTokens.RefreshToken)
+	}
+	a.logger.Info("Codex recovery refresh succeeded - awaiting a successful poll to resume",
 		"account_id", a.accountID)
 }
 
@@ -972,7 +993,7 @@ func (a *CodexAgent) poll(ctx context.Context) {
 
 	// If auth is paused, skip polling until credentials change or a bounded
 	// recovery attempt comes due.
-	if a.authPaused && !a.tryPausedAuthRecovery() {
+	if a.authPaused && !a.tryPausedAuthRecovery(ctx) {
 		return
 	}
 

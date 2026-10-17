@@ -15,17 +15,29 @@ import (
 	"github.com/onllm-dev/onwatch/v2/internal/tracker"
 )
 
-// newRecoveryRefreshAgent builds a paused-able agent whose usage endpoint
-// rejects the stored token and whose OAuth refresh is driven by a seam, so no
-// real endpoint is touched.
-func newRecoveryRefreshAgent(t *testing.T, refresh codexOAuthRefreshFunc) (*CodexAgent, *fakeClock, *atomic.Int32) {
+// recoveryRefreshAgent drives a real CodexAgent whose usage endpoint and OAuth
+// refresh are both stubbed. It never touches a real credential file or the real
+// OAuth endpoint.
+type recoveryRefreshAgent struct {
+	ag    *CodexAgent
+	clock *fakeClock
+}
+
+// newRecoveryRefreshAgent builds the fixture. acceptAccess is the bearer token
+// the usage endpoint accepts (every other token 401s). expiry sets how far out
+// the access token's expiry is, which gates the recovery refresh.
+//
+// A success from the refresh seam is persisted via tokenSave into the mutable
+// credential holder, and the fingerprint tracks it, so the fixture models a real
+// profile file that rotates on refresh.
+func newRecoveryRefreshAgent(t *testing.T, expiry time.Duration, acceptAccess string, refresh codexOAuthRefreshFunc) *recoveryRefreshAgent {
 	t.Helper()
-	// The usage endpoint rejects the stale token but accepts the token a
-	// successful recovery refresh installs.
-	var fetchCalls atomic.Int32
+
+	accepted := &atomic.Value{}
+	accepted.Store(acceptAccess)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetchCalls.Add(1)
-		if r.Header.Get("Authorization") != "Bearer fresh-access" {
+		want, _ := accepted.Load().(string)
+		if r.Header.Get("Authorization") != "Bearer "+want {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -45,76 +57,163 @@ func newRecoveryRefreshAgent(t *testing.T, refresh codexOAuthRefreshFunc) (*Code
 	tr := tracker.NewCodexTracker(st, logger)
 	ag := NewCodexAgent(client, st, tr, time.Minute, logger, nil)
 
-	// The access token is not near expiry, so the proactive refresh path never
-	// fires: only the paused-state recovery refresh is exercised. The usage
-	// endpoint still 401s because the token was revoked server-side.
-	creds := &api.CodexCredentials{
+	holder := &atomic.Pointer[api.CodexCredentials]{}
+	holder.Store(&api.CodexCredentials{
 		AccessToken:  "stale-access",
 		RefreshToken: "refresh-token",
-		ExpiresAt:    time.Now().Add(48 * time.Hour),
-		ExpiresIn:    48 * time.Hour,
+		ExpiresAt:    time.Now().Add(expiry),
+		ExpiresIn:    expiry,
+	})
+	ag.SetCredentialsRefresh(func() *api.CodexCredentials { return holder.Load() })
+	ag.SetTokenRefresh(func() string { return holder.Load().AccessToken })
+	ag.SetCredentialFingerprint(func() string { return codexTokenFingerprint(holder.Load().AccessToken, holder.Load().RefreshToken) })
+	ag.oauthRefresh = func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		resp, err := refresh(ctx, refreshToken)
+		if err == nil && resp != nil {
+			// The seam's success is only "real" once persisted, matching prod.
+			_ = ag.tokenSave(resp.AccessToken, resp.RefreshToken, resp.IDToken, resp.ExpiresIn)
+		}
+		return resp, err
 	}
-	ag.SetCredentialsRefresh(func() *api.CodexCredentials { return creds })
-	ag.SetTokenRefresh(func() string { return "stale-access" })
-	ag.SetCredentialFingerprint(func() string { return "fingerprint-v1" })
-	ag.oauthRefresh = refresh
-	// Never touch a real credential file from a test.
-	ag.SetTokenSave(func(accessToken, refreshToken, idToken string, expiresIn int) error { return nil })
+	// Model the credential file write the recovery refresh performs.
+	ag.SetTokenSave(func(accessToken, refreshToken, idToken string, expiresIn int) error {
+		holder.Store(&api.CodexCredentials{
+			AccessToken:  accessToken,
+			RefreshToken: refreshToken,
+			ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second),
+			ExpiresIn:    time.Duration(expiresIn) * time.Second,
+		})
+		return nil
+	})
 
 	clock := &fakeClock{now: time.Now()}
 	ag.now = clock.Now
-	return ag, clock, &fetchCalls
+
+	return &recoveryRefreshAgent{ag: ag, clock: clock}
 }
 
-func pauseViaAuthFailures(t *testing.T, ag *CodexAgent) {
+// countRefresh wraps a refresh func with a call counter.
+func countRefresh(counter *atomic.Int32, fn codexOAuthRefreshFunc) codexOAuthRefreshFunc {
+	return func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		counter.Add(1)
+		return fn(ctx, refreshToken)
+	}
+}
+
+// forcePaused puts the agent into the paused state with the next recovery
+// attempt already due, without going through the usage-failure path (which the
+// proactive refresh would otherwise race).
+func forcePaused(t *testing.T, ag *CodexAgent) {
 	t.Helper()
-	ctx := context.Background()
-	for i := 0; i < maxCodexAuthFailures; i++ {
-		ag.poll(ctx)
-	}
+	ag.pauseAuth("stale-access")
 	if !ag.AuthPaused() {
-		t.Fatalf("expected pause after %d auth failures", maxCodexAuthFailures)
+		t.Fatal("forcePaused did not pause the agent")
+	}
+	ag.authRetryAt = ag.currentTime().Add(-time.Second) // due now
+}
+
+// advanceWindow moves past the next scheduled recovery attempt.
+func advanceWindow(fx *recoveryRefreshAgent, ag *CodexAgent) {
+	if !ag.authRetryAt.IsZero() {
+		fx.clock.Advance(ag.authRetryAt.Sub(fx.clock.Now()) + time.Second)
+		return
+	}
+	fx.clock.Advance(codexAuthPausedRetryMaxInterval)
+}
+
+// A persistent usage-endpoint 401/403 while the access token is still valid
+// must never trigger a recovery refresh: onWatch would otherwise rotate tokens
+// (and rewrite auth.json) forever, logging the Codex CLI out (issue #147 review,
+// item 1).
+func TestCodexAgent_RecoveryRefreshSkippedWhenTokenNotExpiring(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	fx := newRecoveryRefreshAgent(t, 48*time.Hour, "never", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		return &api.CodexOAuthTokenResponse{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresIn: 3600}, nil
+	}))
+
+	forcePaused(t, fx.ag)
+	ctx := context.Background()
+
+	// Many recovery windows pass; the token is valid, so no refresh may fire.
+	for i := 0; i < 8; i++ {
+		advanceWindow(fx, fx.ag)
+		fx.ag.poll(ctx)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("recovery refresh fired %d times with a valid access token, want 0", got)
+	}
+	if !fx.ag.AuthPaused() {
+		t.Fatal("expected to stay paused while the usage endpoint rejects the token")
 	}
 }
 
-// A transient token-endpoint outage must not strand a profile: one refresh per
-// recovery window is allowed, and a later success resumes polling.
-func TestCodexAgent_RecoveryRefreshTransientThenSuccess(t *testing.T) {
+// An expiring token with a transient token-endpoint outage gets one refresh per
+// recovery window; a later success installs the token, and only a successful
+// usage poll lifts the pause (issue #147 review, item 1).
+func TestCodexAgent_RecoveryRefreshExpiringTransientThenSuccess(t *testing.T) {
 	t.Parallel()
-	var refreshCalls atomic.Int32
-	ag, clock, _ := newRecoveryRefreshAgent(t, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
-		n := refreshCalls.Add(1)
-		if n == 1 {
+	var calls atomic.Int32
+	fx := newRecoveryRefreshAgent(t, time.Hour, "fresh-access", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		if calls.Load() == 1 {
 			return nil, fmt.Errorf("%w: HTTP 503", api.ErrCodexOAuthRefreshFailed)
 		}
-		return &api.CodexOAuthTokenResponse{
-			AccessToken:  "fresh-access",
-			RefreshToken: "fresh-refresh",
-			ExpiresIn:    3600,
-		}, nil
-	})
+		return &api.CodexOAuthTokenResponse{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresIn: 3600}, nil
+	}))
 
-	pauseViaAuthFailures(t, ag)
+	forcePaused(t, fx.ag)
 	ctx := context.Background()
 
-	// First recovery window: one refresh, transient failure, stays paused.
-	clock.Advance(codexAuthPausedRetryInterval + time.Minute)
-	ag.poll(ctx)
-	if got := refreshCalls.Load(); got != 1 {
-		t.Fatalf("refresh calls after first window = %d, want 1", got)
+	// Window 1: one refresh, transient 503, stays paused.
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("refresh calls after window 1 = %d, want 1", got)
 	}
-	if !ag.AuthPaused() {
+	if !fx.ag.AuthPaused() {
 		t.Fatal("a transient refresh failure must not lift the pause")
 	}
 
-	// Second recovery window: refresh succeeds and the pause lifts.
-	clock.Advance(codexAuthPausedRetryMaxInterval)
-	ag.poll(ctx)
-	if got := refreshCalls.Load(); got != 2 {
-		t.Fatalf("refresh calls after second window = %d, want 2", got)
+	// Window 2: refresh succeeds, the usage poll then succeeds and lifts the pause.
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("refresh calls after window 2 = %d, want 2", got)
 	}
-	if ag.AuthPaused() {
-		t.Fatal("a successful recovery refresh must lift the pause")
+	if fx.ag.AuthPaused() {
+		t.Fatal("a successful recovery refresh followed by a successful poll must lift the pause")
+	}
+}
+
+// A successful recovery refresh alone must not reset the backoff: if the usage
+// endpoint keeps rejecting the (now fresh) token, the pause stays and the
+// windows keep escalating rather than restarting at 15m.
+func TestCodexAgent_RecoveryRefreshKeepsBackoffUntilPollSucceeds(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	// The usage endpoint never accepts anything, so no poll ever succeeds.
+	fx := newRecoveryRefreshAgent(t, time.Hour, "nobody", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		return &api.CodexOAuthTokenResponse{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresIn: 3600}, nil
+	}))
+
+	forcePaused(t, fx.ag)
+	ctx := context.Background()
+
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("refresh calls = %d, want 1", got)
+	}
+	attemptAfterFirst := fx.ag.authRetryCount
+
+	// The next window must be the escalated one, not reset to the base interval.
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if fx.ag.authRetryCount <= attemptAfterFirst {
+		t.Fatalf("authRetryCount = %d after a successful refresh, want > %d (backoff must keep escalating)", fx.ag.authRetryCount, attemptAfterFirst)
+	}
+	if !fx.ag.AuthPaused() {
+		t.Fatal("a successful refresh alone must not lift the pause")
 	}
 }
 
@@ -122,23 +221,22 @@ func TestCodexAgent_RecoveryRefreshTransientThenSuccess(t *testing.T) {
 // attempted, or onWatch burns the credential the Codex CLI still needs.
 func TestCodexAgent_RecoveryRefreshReusedTokenStopsRefreshing(t *testing.T) {
 	t.Parallel()
-	var refreshCalls atomic.Int32
-	ag, clock, _ := newRecoveryRefreshAgent(t, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
-		refreshCalls.Add(1)
+	var calls atomic.Int32
+	fx := newRecoveryRefreshAgent(t, time.Hour, "never", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
 		return nil, api.ErrCodexRefreshTokenReused
-	})
+	}))
 
-	pauseViaAuthFailures(t, ag)
+	forcePaused(t, fx.ag)
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		clock.Advance(codexAuthPausedRetryMaxInterval)
-		ag.poll(ctx)
+		advanceWindow(fx, fx.ag)
+		fx.ag.poll(ctx)
 	}
-	if got := refreshCalls.Load(); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("refresh calls = %d, want exactly 1 (dead refresh token must not be replayed)", got)
 	}
-	if !ag.AuthPaused() {
+	if !fx.ag.AuthPaused() {
 		t.Fatal("expected to stay paused with a dead refresh token")
 	}
 }
@@ -146,75 +244,66 @@ func TestCodexAgent_RecoveryRefreshReusedTokenStopsRefreshing(t *testing.T) {
 // An invalid_grant from the token endpoint is also terminal.
 func TestCodexAgent_RecoveryRefreshInvalidGrantStopsRefreshing(t *testing.T) {
 	t.Parallel()
-	var refreshCalls atomic.Int32
-	ag, clock, _ := newRecoveryRefreshAgent(t, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
-		refreshCalls.Add(1)
+	var calls atomic.Int32
+	fx := newRecoveryRefreshAgent(t, time.Hour, "never", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
 		return nil, api.ErrCodexRefreshTokenInvalid
-	})
+	}))
 
-	pauseViaAuthFailures(t, ag)
+	forcePaused(t, fx.ag)
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
-		clock.Advance(codexAuthPausedRetryMaxInterval)
-		ag.poll(ctx)
+		advanceWindow(fx, fx.ag)
+		fx.ag.poll(ctx)
 	}
-	if got := refreshCalls.Load(); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("refresh calls = %d, want exactly 1 for a terminal invalid_grant", got)
 	}
 }
 
-// A fingerprint change (re-authentication) unblocks refresh even after a
-// terminal failure, because the new credential source is a fresh token. Here
-// the new credentials still fail server-side auth, so the agent re-pauses and
-// must be allowed to refresh again rather than staying permanently blocked.
-func TestCodexAgent_RecoveryRefreshUnblockedByFingerprintChange(t *testing.T) {
+// A real re-authentication (a new refresh token) must unblock refresh even
+// after a terminal failure, because the consumed key no longer applies.
+func TestCodexAgent_RecoveryRefreshUnblockedByNewRefreshToken(t *testing.T) {
 	t.Parallel()
-	var refreshCalls atomic.Int32
-	ag, clock, _ := newRecoveryRefreshAgent(t, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
-		refreshCalls.Add(1)
+	var calls atomic.Int32
+	fx := newRecoveryRefreshAgent(t, time.Hour, "never", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		if refreshToken == "refresh-token-2" {
+			return nil, fmt.Errorf("%w: HTTP 503", api.ErrCodexOAuthRefreshFailed)
+		}
 		return nil, api.ErrCodexRefreshTokenReused
-	})
-	// Swap the fingerprint to simulate a fresh login after the terminal failure.
-	var fingerprint atomic.Value
-	fingerprint.Store("fingerprint-v1")
-	ag.SetCredentialFingerprint(func() string {
-		v, _ := fingerprint.Load().(string)
-		return v
-	})
+	}))
 
-	// First credential: terminal failure blocks further refresh.
-	pauseViaAuthFailures(t, ag)
+	forcePaused(t, fx.ag)
 	ctx := context.Background()
-	clock.Advance(codexAuthPausedRetryMaxInterval)
-	ag.poll(ctx)
-	if got := refreshCalls.Load(); got != 1 {
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("refresh calls = %d, want 1", got)
 	}
-	clock.Advance(codexAuthPausedRetryMaxInterval)
-	ag.poll(ctx)
-	if got := refreshCalls.Load(); got != 1 {
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("terminal token replayed: refresh calls = %d, want 1", got)
 	}
 
-	// The user re-authenticates: a new fingerprint. The new credentials also
-	// fail server-side, so after re-pausing the agent may refresh again.
-	fingerprint.Store("fingerprint-v2")
-	ag.lastToken = "" // force a token re-read on the next poll
-	for i := 0; i < maxCodexAuthFailures+1; i++ {
-		ag.poll(ctx)
+	// The user re-authenticates: a brand new refresh token.
+	newCreds := &api.CodexCredentials{
+		AccessToken:  "stale-access-2",
+		RefreshToken: "refresh-token-2",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		ExpiresIn:    time.Hour,
 	}
-	if !ag.AuthPaused() {
-		t.Fatal("expected to re-pause on the new credentials")
-	}
-	clock.Advance(codexAuthPausedRetryMaxInterval)
-	ag.poll(ctx)
-	if got := refreshCalls.Load(); got != 2 {
-		t.Fatalf("refresh calls after re-auth = %d, want 2 (terminal block must clear for new creds)", got)
+	fx.ag.SetCredentialsRefresh(func() *api.CodexCredentials { return newCreds })
+	fx.ag.SetTokenRefresh(func() string { return newCreds.AccessToken })
+	fx.ag.SetCredentialFingerprint(func() string { return "fp-" + newCreds.RefreshToken })
+
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("refresh calls after re-auth = %d, want 2 (new refresh token is a new key)", got)
 	}
 }
 
-// Two agents that share the same refresh token (same fingerprint) must not both
-// consume the one-time-use token within a window.
+// The coordinator admits at most one refresh per credential source per window.
 func TestCodexRefreshCoordinator_SharedFingerprintSingleClaim(t *testing.T) {
 	t.Parallel()
 	coord := newCodexRefreshCoordinator()
@@ -234,34 +323,27 @@ func TestCodexRefreshCoordinator_SharedFingerprintSingleClaim(t *testing.T) {
 	}
 }
 
-// End to end: two profiles sharing a refresh token refresh only once.
-func TestCodexAgent_RecoveryRefreshSharedAcrossProfiles(t *testing.T) {
+// A successful recovery refresh persists the rotated token and installs it on
+// the client, and a subsequent successful poll lifts the pause (the happy path).
+func TestCodexAgent_RecoveryRefreshSuccessThenPollResumes(t *testing.T) {
 	t.Parallel()
-	shared := newCodexRefreshCoordinator()
+	var calls atomic.Int32
+	fx := newRecoveryRefreshAgent(t, time.Hour, "fresh-access", countRefresh(&calls, func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+		return &api.CodexOAuthTokenResponse{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresIn: 3600}, nil
+	}))
 
-	var refreshCalls atomic.Int32
-	mkRefresh := func() codexOAuthRefreshFunc {
-		return func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
-			refreshCalls.Add(1)
-			return nil, fmt.Errorf("%w: HTTP 503", api.ErrCodexOAuthRefreshFailed)
-		}
+	forcePaused(t, fx.ag)
+	ctx := context.Background()
+
+	advanceWindow(fx, fx.ag)
+	fx.ag.poll(ctx)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("refresh calls = %d, want 1", got)
 	}
-
-	ag1, clock1, _ := newRecoveryRefreshAgent(t, mkRefresh())
-	ag2, _, _ := newRecoveryRefreshAgent(t, mkRefresh())
-	ag1.refreshCoordinator = shared
-	ag2.refreshCoordinator = shared
-	// Same clock so both recovery windows align.
-	ag2.now = clock1.Now
-
-	pauseViaAuthFailures(t, ag1)
-	pauseViaAuthFailures(t, ag2)
-
-	clock1.Advance(codexAuthPausedRetryInterval + time.Minute)
-	ag1.poll(context.Background())
-	ag2.poll(context.Background())
-
-	if got := refreshCalls.Load(); got != 1 {
-		t.Fatalf("shared refresh token consumed %d times, want 1", got)
+	if fx.ag.AuthPaused() {
+		t.Fatal("expected the successful poll to lift the pause")
+	}
+	if fx.ag.authRetryCount != 0 {
+		t.Fatalf("authRetryCount = %d, want 0 after a successful poll", fx.ag.authRetryCount)
 	}
 }
