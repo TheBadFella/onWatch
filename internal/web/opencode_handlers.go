@@ -4,11 +4,23 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
 	"github.com/onllm-dev/onwatch/v2/internal/tracker"
 )
+
+// openCodeQuotaStatus maps the upstream window status (key mode) to the
+// dashboard status vocabulary. A window whose status is not "ok" is critical
+// whatever its percent; an empty or unknown status falls back to the percent
+// bands, so an unrecognised value never silently reads as healthy.
+func openCodeQuotaStatus(utilization float64, status string) string {
+	if s := strings.TrimSpace(status); s != "" && !strings.EqualFold(s, "ok") {
+		return "critical"
+	}
+	return utilStatus(utilization)
+}
 
 // SetOpenCodeTracker sets the OpenCode tracker for usage summary enrichment.
 func (h *Handler) SetOpenCodeTracker(t *tracker.OpenCodeTracker) {
@@ -208,7 +220,9 @@ func (h *Handler) buildOpenCodeCurrent() map[string]interface{} {
 				"used":          q.Used,
 				"limit":         q.Limit,
 				"format":        string(q.Format),
-				"status":        utilStatus(q.Utilization),
+				"percentOnly":   q.Format == api.OpenCodeQuotaFormatPercent,
+				"status":        openCodeQuotaStatus(q.Utilization, q.Status),
+				"statusLabel":   q.Status,
 				"lastUpdatedAt": latest.CapturedAt.Format(time.RFC3339),
 				"ageSeconds":    int64(now.Sub(latest.CapturedAt).Seconds()),
 			}
@@ -249,7 +263,9 @@ func (h *Handler) buildOpenCodeCurrent() map[string]interface{} {
 			"used":          q.Used,
 			"limit":         q.Limit,
 			"format":        q.Format,
-			"status":        utilStatus(q.Utilization),
+			"percentOnly":   q.Format == string(api.OpenCodeQuotaFormatPercent),
+			"status":        openCodeQuotaStatus(q.Utilization, q.Status),
+			"statusLabel":   q.Status,
 			"lastUpdatedAt": q.CapturedAt.Format(time.RFC3339),
 			"ageSeconds":    int64(age.Seconds()),
 			"isStale":       age > 30*time.Minute,

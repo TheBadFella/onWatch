@@ -830,6 +830,7 @@ func (s *Store) createTables() error {
 			limit_value REAL NOT NULL DEFAULT 0,
 			utilization REAL NOT NULL DEFAULT 0,
 			format TEXT NOT NULL DEFAULT 'percent',
+			status TEXT NOT NULL DEFAULT '',
 			resets_at TEXT,
 			FOREIGN KEY (snapshot_id) REFERENCES opencode_snapshots(id)
 		);
@@ -1368,6 +1369,18 @@ func (s *Store) migrateSchema() error {
 				!strings.Contains(err.Error(), "no such table") {
 				return fmt.Errorf("failed to add weekly column to minimax_model_values: %w", err)
 			}
+		}
+	}
+
+	// Record the upstream window status (key-mode usage API) so a blocked
+	// window can render critical whatever its percent. Existing rows default
+	// to '' and are treated as status-unknown.
+	if _, err := s.db.Exec(`
+		ALTER TABLE opencode_quota_values ADD COLUMN status TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") &&
+			!strings.Contains(err.Error(), "no such table") {
+			return fmt.Errorf("failed to add status to opencode_quota_values: %w", err)
 		}
 	}
 

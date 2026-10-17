@@ -24,6 +24,9 @@ type OpenCodeLatestQuota struct {
 	Limit       float64
 	Utilization float64
 	Format      string
+	// Status is the upstream window status carried from the usage API. Empty
+	// for cookie mode and for rows written before the column existed.
+	Status      string
 	ResetsAt    *time.Time
 	CapturedAt  time.Time
 	AccountType string
@@ -60,8 +63,8 @@ func (s *Store) InsertOpenCodeSnapshot(snapshot *api.OpenCodeSnapshot) (int64, e
 			resetsAt = q.ResetsAt.Format(time.RFC3339Nano)
 		}
 		_, err := tx.Exec(
-			`INSERT INTO opencode_quota_values (snapshot_id, quota_name, used, limit_value, utilization, format, resets_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			snapshotID, q.Name, q.Used, q.Limit, q.Utilization, string(q.Format), resetsAt,
+			`INSERT INTO opencode_quota_values (snapshot_id, quota_name, used, limit_value, utilization, format, status, resets_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshotID, q.Name, q.Used, q.Limit, q.Utilization, string(q.Format), q.Status, resetsAt,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert quota value %s: %w", q.Name, err)
@@ -95,7 +98,7 @@ func (s *Store) QueryLatestOpenCode() (*api.OpenCodeSnapshot, error) {
 	snapshot.PlanName = planName
 
 	rows, err := s.db.Query(
-		`SELECT quota_name, used, limit_value, utilization, format, resets_at FROM opencode_quota_values WHERE snapshot_id = ? ORDER BY quota_name`,
+		`SELECT quota_name, used, limit_value, utilization, format, status, resets_at FROM opencode_quota_values WHERE snapshot_id = ? ORDER BY quota_name`,
 		snapshot.ID,
 	)
 	if err != nil {
@@ -107,7 +110,7 @@ func (s *Store) QueryLatestOpenCode() (*api.OpenCodeSnapshot, error) {
 		var q api.OpenCodeQuota
 		var format string
 		var resetsAt sql.NullString
-		if err := rows.Scan(&q.Name, &q.Used, &q.Limit, &q.Utilization, &format, &resetsAt); err != nil {
+		if err := rows.Scan(&q.Name, &q.Used, &q.Limit, &q.Utilization, &format, &q.Status, &resetsAt); err != nil {
 			return nil, fmt.Errorf("failed to scan quota value: %w", err)
 		}
 		q.Format = api.OpenCodeQuotaFormat(format)
@@ -163,7 +166,7 @@ func (s *Store) QueryOpenCodeRange(start, end time.Time, limit ...int) ([]*api.O
 
 	for _, snap := range snapshots {
 		qRows, err := s.db.Query(
-			`SELECT quota_name, used, limit_value, utilization, format, resets_at FROM opencode_quota_values WHERE snapshot_id = ? ORDER BY quota_name`,
+			`SELECT quota_name, used, limit_value, utilization, format, status, resets_at FROM opencode_quota_values WHERE snapshot_id = ? ORDER BY quota_name`,
 			snap.ID,
 		)
 		if err != nil {
@@ -173,7 +176,7 @@ func (s *Store) QueryOpenCodeRange(start, end time.Time, limit ...int) ([]*api.O
 			var q api.OpenCodeQuota
 			var format string
 			var resetsAt sql.NullString
-			if err := qRows.Scan(&q.Name, &q.Used, &q.Limit, &q.Utilization, &format, &resetsAt); err != nil {
+			if err := qRows.Scan(&q.Name, &q.Used, &q.Limit, &q.Utilization, &format, &q.Status, &resetsAt); err != nil {
 				qRows.Close()
 				return nil, fmt.Errorf("failed to scan quota value: %w", err)
 			}
@@ -389,7 +392,7 @@ func (s *Store) QueryOpenCodeUtilizationSeries(quotaName string, since time.Time
 
 func (s *Store) QueryOpenCodeLatestPerQuota() ([]OpenCodeLatestQuota, error) {
 	rows, err := s.db.Query(`
-		SELECT qv.quota_name, qv.used, qv.limit_value, qv.utilization, qv.format, qv.resets_at,
+		SELECT qv.quota_name, qv.used, qv.limit_value, qv.utilization, qv.format, qv.status, qv.resets_at,
 		       s.captured_at, s.account_type, s.plan_name
 		FROM opencode_quota_values qv
 		JOIN opencode_snapshots s ON s.id = qv.snapshot_id
@@ -404,10 +407,10 @@ func (s *Store) QueryOpenCodeLatestPerQuota() ([]OpenCodeLatestQuota, error) {
 	for rows.Next() {
 		var name, format, accountType, planName string
 		var used, limitValue, utilization float64
-		var resetsAt sql.NullString
+		var status, resetsAt sql.NullString
 		var capturedAt string
 
-		if err := rows.Scan(&name, &used, &limitValue, &utilization, &format, &resetsAt, &capturedAt, &accountType, &planName); err != nil {
+		if err := rows.Scan(&name, &used, &limitValue, &utilization, &format, &status, &resetsAt, &capturedAt, &accountType, &planName); err != nil {
 			return nil, fmt.Errorf("failed to scan latest quota: %w", err)
 		}
 
@@ -417,6 +420,7 @@ func (s *Store) QueryOpenCodeLatestPerQuota() ([]OpenCodeLatestQuota, error) {
 			Limit:       limitValue,
 			Utilization: utilization,
 			Format:      format,
+			Status:      status.String,
 			AccountType: accountType,
 			PlanName:    planName,
 		}

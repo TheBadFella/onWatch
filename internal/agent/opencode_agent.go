@@ -27,7 +27,13 @@ type OpenCodeAgent struct {
 	sm           *SessionManager
 	notifier     *notify.NotificationEngine
 	pollingCheck func() bool
-	cfg          *config.Config
+	// Credentials are captured by value when the agent is built so a poll never
+	// reads the live config. The settings save path mutates the shared config
+	// while agents poll (reconcileProviderAgents), so reading it here would be a
+	// data race. A key or cookie change restarts the agent with a fresh copy.
+	apiKey      string
+	workspaceID string
+	authCookie  string
 }
 
 func (a *OpenCodeAgent) SetPollingCheck(fn func() bool) {
@@ -42,15 +48,20 @@ func NewOpenCodeAgent(client openCodeFetcher, store *store.Store, tr *tracker.Op
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &OpenCodeAgent{
+	a := &OpenCodeAgent{
 		client:   client,
 		store:    store,
 		tracker:  tr,
-		cfg:      cfg,
 		interval: interval,
 		logger:   logger,
 		sm:       sm,
 	}
+	if cfg != nil {
+		a.apiKey = cfg.OpenCodeGoAPIKey
+		a.workspaceID = cfg.OpenCodeGoWorkspaceID
+		a.authCookie = cfg.OpenCodeGoAuthCookie
+	}
+	return a
 }
 
 func (a *OpenCodeAgent) Run(ctx context.Context) error {
@@ -79,7 +90,7 @@ func (a *OpenCodeAgent) Run(ctx context.Context) error {
 }
 
 func (a *OpenCodeAgent) poll(ctx context.Context) {
-	if a.client == nil || a.cfg == nil {
+	if a.client == nil {
 		return
 	}
 	if a.pollingCheck != nil && !a.pollingCheck() {
@@ -139,8 +150,8 @@ func (a *OpenCodeAgent) poll(ctx context.Context) {
 // fetch reads the Go status API with the service-account key when one is set,
 // otherwise with the workspace ID + console session cookie.
 func (a *OpenCodeAgent) fetch(ctx context.Context) (*api.OpenCodeSnapshot, error) {
-	if key := a.cfg.OpenCodeGoAPIKey; key != "" {
-		return a.client.FetchUsageSnapshot(ctx, key)
+	if a.apiKey != "" {
+		return a.client.FetchUsageSnapshot(ctx, a.apiKey)
 	}
-	return a.client.FetchSnapshot(ctx, a.cfg.OpenCodeGoWorkspaceID, a.cfg.OpenCodeGoAuthCookie)
+	return a.client.FetchSnapshot(ctx, a.workspaceID, a.authCookie)
 }

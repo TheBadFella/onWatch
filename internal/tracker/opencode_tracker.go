@@ -3,6 +3,7 @@ package tracker
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
@@ -12,8 +13,13 @@ import (
 const openCodeResetDriftTolerance = 90 * time.Minute
 
 type OpenCodeTracker struct {
-	store      *store.Store
-	logger     *slog.Logger
+	store  *store.Store
+	logger *slog.Logger
+	// mu guards the in-memory cycle state below. One tracker is shared by every
+	// OpenCode agent - each runtime restart builds a fresh agent over the same
+	// tracker - so concurrent Process calls are possible and the maps would
+	// otherwise be a "concurrent map writes" panic.
+	mu         sync.Mutex
 	lastValues map[string]float64
 	lastResets map[string]string
 	hasLast    bool
@@ -21,7 +27,9 @@ type OpenCodeTracker struct {
 }
 
 func (t *OpenCodeTracker) SetOnReset(fn func(string)) {
+	t.mu.Lock()
 	t.onReset = fn
+	t.mu.Unlock()
 }
 
 type OpenCodeSummary struct {
@@ -51,6 +59,8 @@ func NewOpenCodeTracker(store *store.Store, logger *slog.Logger) *OpenCodeTracke
 }
 
 func (t *OpenCodeTracker) Process(snapshot *api.OpenCodeSnapshot) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	for _, quota := range snapshot.Quotas {
 		if err := t.processQuota(quota, snapshot.CapturedAt); err != nil {
 			return fmt.Errorf("opencode tracker: %s: %w", quota.Name, err)
