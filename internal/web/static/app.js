@@ -4029,6 +4029,26 @@ const opencodeChartColorFallback = [
   { border: '#ec4899', bg: 'rgba(236, 72, 153, 0.08)' }
 ];
 
+// openCodeCardLabel renders the card's fraction line. Percent-only quotas
+// (key mode: a bare percent, synthetic limit of 100) show the same static
+// "Utilization" label as Codex and Anthropic instead of a fake "10 / 100".
+// Cookie mode reports real dollar amounts and keeps its "$used / $limit".
+function openCodeCardLabel(q) {
+  if (q.format === 'currency') {
+    return '$' + (q.used || 0).toFixed(2) + ' / $' + (q.limit || 0).toFixed(2);
+  }
+  if (q.percentOnly) return 'Utilization';
+  return (q.used || 0) + ' / ' + (q.limit || 0);
+}
+
+// openCodeStatusNote is the raw upstream window status for a tooltip suffix.
+// Empty for a healthy ("ok") or absent status; an unknown value is shown as-is.
+function openCodeStatusNote(q) {
+  const label = q.statusLabel;
+  if (!label || String(label).toLowerCase() === 'ok') return '';
+  return String(label);
+}
+
 function renderOpenCodeQuotaCards(quotas, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -4052,7 +4072,9 @@ function renderOpenCodeQuotaCards(quotas, containerId) {
     const resetId = `reset-opencode-${q.name}`;
     const countdownId = `countdown-opencode-${q.name}`;
 
-    const cardLabel = q.format === 'currency' ? '$' + (q.used || 0).toFixed(2) + ' / $' + (q.limit || 0).toFixed(2) : (q.used || 0) + ' / ' + (q.limit || 0);
+    const cardLabel = openCodeCardLabel(q);
+    const statusNote = openCodeStatusNote(q);
+    const statusTitle = statusNote ? ` title="${escapeHTML(statusNote)}"` : '';
 
     return `<article class="quota-card opencode-card" data-quota="${q.name}" data-provider="opencode" role="button" tabindex="0" aria-label="View ${displayName} details" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
@@ -4064,7 +4086,7 @@ function renderOpenCodeQuotaCards(quotas, containerId) {
       </header>
       <div class="progress-stats">
         <span class="usage-percent" id="${percentId}">${usagePct}%</span>
-        <span class="usage-fraction" id="${fractionId}">${cardLabel}</span>
+        <span class="usage-fraction" id="${fractionId}">${escapeHTML(cardLabel)}</span>
       </div>
       <div class="progress-wrapper">
         <div class="progress-bar" role="progressbar" aria-valuenow="${Math.round(displayPct)}" aria-valuemin="0" aria-valuemax="100">
@@ -4072,9 +4094,9 @@ function renderOpenCodeQuotaCards(quotas, containerId) {
         </div>
       </div>
       <footer class="card-footer">
-        <span class="status-badge" id="${statusId}" data-status="${status}">
+        <span class="status-badge" id="${statusId}" data-status="${status}"${statusTitle}>
           <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${statusCfg.icon}"/></svg>
-          ${statusCfg.label}
+          ${escapeHTML(statusNote ? statusNote : statusCfg.label)}
         </span>
         <span class="reset-time" id="${resetId}"${q.resetsAt ? ` data-reset-at="${q.resetsAt}"` : ''}>${q.resetsAt ? formatResetTime(q.resetsAt) : ''}</span>
       </footer>
@@ -4136,13 +4158,18 @@ function updateOpenCodeCard(quota) {
     }
   }
   if (fractionEl) {
-    const cardLabel = quota.format === 'currency' ? '$' + (quota.used || 0).toFixed(2) + ' / $' + (quota.limit || 0).toFixed(2) : (quota.used || 0) + ' / ' + (quota.limit || 0);
-    fractionEl.textContent = cardLabel;
+    fractionEl.textContent = openCodeCardLabel(quota);
   }
   if (statusEl) {
     const config = statusConfig[status] || statusConfig.healthy;
+    const statusNote = openCodeStatusNote(quota);
     statusEl.setAttribute('data-status', status);
-    statusEl.innerHTML = `<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${config.icon}"/></svg>${config.label}`;
+    if (statusNote) {
+      statusEl.setAttribute('title', statusNote);
+    } else {
+      statusEl.removeAttribute('title');
+    }
+    statusEl.innerHTML = `<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${config.icon}"/></svg>${escapeHTML(statusNote ? statusNote : config.label)}`;
   }
   if (resetEl) {
     if (quota.resetsAt) {
@@ -5398,7 +5425,7 @@ async function fetchDeepInsights() {
           (s.metric || s.severity || s.desc)
             ? buildEnrichedStatHTML(s)
             : `<div class="insight-stat">
-                <div class="insight-stat-value">${escapeHTML(s.value)}</div>
+                ${insightStatValueHTML(s.value)}
                 <div class="insight-stat-label">${escapeHTML(s.label)}</div>
                 ${s.sublabel ? `<div class="insight-stat-sublabel">${escapeHTML(s.sublabel)}</div>` : ''}
               </div>`
@@ -5547,7 +5574,7 @@ function renderAPIIntegrationsInsights() {
     { label: 'Average Tokens per Call', value: avgTokensPerCall > 0 ? formatNumber(avgTokensPerCall.toFixed(1)) : '0.0', sublabel: 'Average request size across all recorded calls' },
   ].map((stat) => `
     <div class="insight-stat">
-      <div class="insight-stat-value">${stat.value}</div>
+      ${insightStatValueHTML(stat.value)}
       <div class="insight-stat-label">${stat.label}</div>
       <div class="insight-stat-sublabel">${stat.sublabel}</div>
     </div>
@@ -5561,10 +5588,10 @@ function renderAPIIntegrationsInsights() {
     { label: 'API Calls in Range', value: formatNumber(recentRequestCount), sublabel: 'Recorded requests in the selected chart range' },
     { label: 'Usage Change vs Earlier Half', value: `${trendDelta >= 0 ? '+' : '-'}${Math.abs(trendPct).toFixed(1)}%`, sublabel: `Compared with the earlier half of the visible window (${trendDelta >= 0 ? 'up' : 'down'} ${formatNumber(Math.abs(trendDelta))} tokens)` },
     { label: 'Average Tokens per Call in Range', value: recentAvgTokensPerCall > 0 ? formatNumber(recentAvgTokensPerCall.toFixed(1)) : '0.0', sublabel: 'Average request size inside the visible window' },
-    { label: 'Busiest Integration in Range', value: busiestRecentIntegration ? escapeHTML(busiestRecentIntegration) : '--', sublabel: busiestRecentTokens > 0 ? `${formatNumber(busiestRecentTokens)} tokens in the selected range` : 'Waiting for more recent activity' },
+    { label: 'Busiest Integration in Range', value: busiestRecentIntegration || '--', sublabel: busiestRecentTokens > 0 ? `${formatNumber(busiestRecentTokens)} tokens in the selected range` : 'Waiting for more recent activity' },
   ].map((stat) => `
     <div class="insight-stat">
-      <div class="insight-stat-value">${stat.value}</div>
+      ${insightStatValueHTML(stat.value)}
       <div class="insight-stat-label">${stat.label}</div>
       <div class="insight-stat-sublabel">${stat.sublabel}</div>
     </div>
@@ -5617,7 +5644,7 @@ function renderBothInsights(data, statsEl, cardsEl) {
       <h4 class="provider-insights-label">${label}</h4>
       <div class="insights-stats">${providerStats.map(s =>
         `<div class="insight-stat">
-          <div class="insight-stat-value">${s.value}</div>
+          ${insightStatValueHTML(s.value)}
           <div class="insight-stat-label">${s.label}</div>
           ${s.sublabel ? `<div class="insight-stat-sublabel">${s.sublabel}</div>` : ''}
         </div>`
@@ -5679,6 +5706,16 @@ function renderBothInsights(data, statsEl, cardsEl) {
       toggleInsightVisibility(btn.dataset.key);
     });
   });
+}
+
+// insightStatValueHTML renders a stat value that stays inside its card: long
+// strings (for example a provider account name) get a smaller class so they
+// ellipsize instead of overlapping the neighbouring stat, and the full value
+// is always available through the title tooltip.
+function insightStatValueHTML(value) {
+  const text = value == null ? '' : String(value);
+  const isLong = text.length > 12;
+  return `<div class="insight-stat-value${isLong ? ' is-long' : ''}" title="${escapeHTML(text)}">${escapeHTML(text)}</div>`;
 }
 
 function buildEnrichedStatHTML(s) {
@@ -5887,6 +5924,8 @@ function initChart() {
     defaultDatasets = []; // OpenCode datasets are dynamic
   } else if (provider === 'ollama') {
     defaultDatasets = []; // Ollama datasets are dynamic
+  } else if (provider === 'commandcode') {
+    defaultDatasets = []; // Command Code datasets are dynamic (five_hour/weekly/monthly)
   } else if (isBalanceProvider(provider)) {
     defaultDatasets = []; // Balance datasets are built when history data arrives
   } else if (provider === 'zai') {
@@ -6477,6 +6516,42 @@ async function fetchHistory(range) {
       ];
       configs.forEach(cfg => {
         const rawData = flattenedRows.map(d => ({ x: new Date(d.capturedAt), y: d[cfg.key] || 0 }));
+        const { data, gapSegments, pointRadii } = processDataWithGaps(rawData, range);
+        datasets.push({ label: cfg.label, data: data, borderColor: cfg.color, backgroundColor: cfg.bg, fill: true, tension: 0.4, borderWidth: 2, pointRadius: pointRadii, pointHoverRadius: 4, hidden: State.hiddenQuotas.has(cfg.hiddenKey), spanGaps: true, segment: getSegmentStyle(gapSegments, cfg.color) });
+      });
+      State.chart.data.datasets = datasets;
+      updateTimeScale(State.chart, range);
+      State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
+      State.chart.options.scales.y.max = State.chartYMax;
+      State.chart.update();
+      return;
+    }
+
+    if (provider === 'commandcode') {
+      // Command Code history: array of { capturedAt, quotas: [{ name, utilization }] }.
+      // Plot the three credit windows the cards show - five_hour, weekly and
+      // monthly - as utilization percentages, matching the Command Code cards
+      // and the way the other multi-window providers chart their quotas.
+      const flattenedRows = historyRows.map(row => {
+        const flat = { capturedAt: row.capturedAt };
+        if (Array.isArray(row.quotas)) {
+          row.quotas.forEach(q => { flat[q.name] = q.utilization || 0; });
+        }
+        return flat;
+      });
+      const datasets = [];
+      const configs = commandCodeQuotaOrder.map((key) => {
+        const color = commandCodeChartColorMap[key] || commandCodeChartColorFallback[0];
+        return {
+          label: commandCodeDisplayNames[key] || key,
+          key: key,
+          hiddenKey: key,
+          color: color.border,
+          bg: color.bg,
+        };
+      });
+      configs.forEach(cfg => {
+        const rawData = flattenedRows.map(d => ({ x: new Date(d.capturedAt), y: d[cfg.key] }));
         const { data, gapSegments, pointRadii } = processDataWithGaps(rawData, range);
         datasets.push({ label: cfg.label, data: data, borderColor: cfg.color, backgroundColor: cfg.bg, fill: true, tension: 0.4, borderWidth: 2, pointRadius: pointRadii, pointHoverRadius: 4, hidden: State.hiddenQuotas.has(cfg.hiddenKey), spanGaps: true, segment: getSegmentStyle(gapSegments, cfg.color) });
       });
@@ -11442,7 +11517,7 @@ const providerSettingsConfig = {
     fields: [],
   },
   mistral: {
-    title: 'Mistral', desc: 'Track included API and Vibe allowances plus separate pay-as-you-go charges. Authentication changes require a daemon restart; display changes apply immediately.',
+    title: 'Mistral', desc: 'Track included API and Vibe allowances plus separate pay-as-you-go charges. Authentication and display changes apply immediately.',
     fields: [
       {id:'enabled',label:'Enable Mistral',type:'select',options:[{value:'true',text:'Enabled'},{value:'false',text:'Disabled'}],default:'false'},
       {id:'auth_mode',label:'Authentication',type:'select',options:[{value:'automatic',text:'Automatic browser import'},{value:'manual',text:'Manual cookies'}],default:'automatic'},
@@ -11454,7 +11529,7 @@ const providerSettingsConfig = {
   },
   opencode: {
     title: 'OpenCode Go',
-    desc: 'Configure OpenCode Go quota tracking. onWatch reads your plan\'s 5-hour, weekly and monthly meters from the OpenCode console, using a service-account key or your browser session. Changes take effect after daemon restart.',
+    desc: 'Configure OpenCode Go quota tracking. onWatch reads your plan\'s 5-hour, weekly and monthly meters from the OpenCode console, using a service-account key or your browser session. Changes apply immediately.',
     fields: [
       { id: 'api_key', label: 'Usage API Key', type: 'password', placeholder: 'Not configured', hint: 'OpenCode console service-account key (oc_sk_...) of the account with the Go subscription. Used instead of the session cookie when set. Overrides OPENCODE_GO_API_KEY from .env.', sensitive: true },
       { id: 'workspace_id', label: 'Workspace ID', type: 'text', placeholder: 'wrk_...', hint: 'Session mode: your OpenCode Go workspace ID (wrk_...). Overrides OPENCODE_GO_WORKSPACE_ID from .env.' },
@@ -11551,6 +11626,12 @@ async function openProviderSettingsModal(providerKey) {
         const isSet = saved[f.id + '_set'] === true;
         const placeholder = isSet ? 'Key is configured - leave blank to keep' : (f.placeholder || '');
         html += `<input type="password" id="ps-${providerKey}-${f.id}" class="settings-input" placeholder="${placeholder}" autocomplete="off" />`;
+        if (isSet) {
+          // A blank password means "keep". Clearing is a distinct action, sent
+          // as clear_<field> so the backend removes the stored credential and
+          // stops the agent.
+          html += `<label class="settings-clear-field"><input type="checkbox" id="ps-${providerKey}-${f.id}-clear" data-clear-field="${f.id}" /> Clear saved value</label>`;
+        }
       } else {
         const val = saved[f.id] || '';
         html += `<input type="text" id="ps-${providerKey}-${f.id}" class="settings-input" value="${escapeHtml(val)}" placeholder="${f.placeholder || ''}" />`;
@@ -11831,8 +11912,14 @@ async function saveProviderSettings() {
     if (!el) return;
 
     if (f.type === 'password' && f.sensitive) {
-      // Only include if user typed a new value
-      if (el.value) provData[f.id] = el.value;
+      const clearBox = document.getElementById(`ps-${providerKey}-${f.id}-clear`);
+      if (clearBox && clearBox.checked) {
+        // Explicit clear: the backend removes the stored credential.
+        provData[`clear_${f.id}`] = true;
+      } else if (el.value) {
+        // Only include if user typed a new value; blank means keep.
+        provData[f.id] = el.value;
+      }
     } else if (f.type === 'number') {
       provData[f.id] = parseInt(el.value, 10) || f.default || 0;
     } else {
@@ -11856,6 +11943,12 @@ async function saveProviderSettings() {
     let anyChange = false;
     let restartNeeded = false;
     config.fields.forEach(f => {
+      if (provData[`clear_${f.id}`] === true) {
+        // An explicit clear always removes a credential.
+        anyChange = true;
+        if (!f.noRestart) restartNeeded = true;
+        return;
+      }
       if (!(f.id in provData)) return;
       const changed = (f.type === 'password' && f.sensitive)
         ? true // sensitive fields are only present when newly typed
@@ -11872,6 +11965,10 @@ async function saveProviderSettings() {
       if (!State.providerSettings) State.providerSettings = {};
       State.providerSettings[providerKey] = provData;
     }
+    // OpenCode and Mistral build a fresh agent on restart, so a credential or
+    // enable change applies without a daemon restart. Every other provider
+    // keeps its startup-built agent, so those changes need one.
+    if (restartNeeded && (providerKey === 'opencode' || providerKey === 'mistral')) restartNeeded = false;
     const savedMsg = !anyChange
       ? 'Settings saved.'
       : (restartNeeded

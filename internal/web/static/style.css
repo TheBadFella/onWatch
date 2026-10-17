@@ -1391,6 +1391,11 @@ button, input, select { font-family: inherit; }
   border-radius: var(--radius-md);
   border: 1px solid color-mix(in srgb, var(--accent-teal) 15%, var(--border-light));
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  /* Long values (for example an account name) must stay inside the card and
+     never paint over the neighbouring stat. min-width:0 lets the grid track
+     shrink below its content width so the value below can ellipsize. */
+  min-width: 0;
+  overflow: hidden;
 }
 .insight-stat:hover {
   transform: translateY(-1px);
@@ -1404,6 +1409,16 @@ button, input, select { font-family: inherit; }
   font-family: var(--font-primary);
   color: var(--text-primary);
   line-height: 1.2;
+  /* Truncate rather than overflow. The full value is exposed via the title
+     attribute set at render time, and long strings shrink first (see
+     .is-long) so a name like "aniketpratapsiny5..." still fits. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insight-stat-value.is-long {
+  font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
 .insight-stat-label {
@@ -2822,6 +2837,21 @@ select.settings-input {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+/* Explicit clear control for a saved credential (blank input means "keep"). */
+.settings-clear-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.settings-clear-field input[type="checkbox"] {
+  margin: 0;
 }
 
 /* Threshold slider group */
