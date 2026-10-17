@@ -113,6 +113,12 @@ func RefreshCodexTokenWithURL(ctx context.Context, refreshToken, tokenURL string
 			}
 			return nil, fmt.Errorf("%w: %s - %s", ErrCodexOAuthRefreshFailed, errResp.Error, errResp.ErrorDescription)
 		}
+		// A 401 with no error body is the endpoint rejecting the refresh token
+		// outright - terminal, like invalid_grant. Other statuses (5xx, 429) are
+		// transient and may be retried on the next recovery window.
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("%w: HTTP %d", ErrCodexRefreshTokenInvalid, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("%w: HTTP %d", ErrCodexOAuthRefreshFailed, resp.StatusCode)
 	}
 

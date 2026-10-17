@@ -508,6 +508,19 @@ func (a *CodexAgent) currentFingerprint() string {
 	return a.credentialFingerprint()
 }
 
+// resolveFingerprint returns the credential-source fingerprint, falling back to
+// the token digest when no hook is wired, so the dead-token check and
+// cross-agent dedup key on the same value in both cases.
+func (a *CodexAgent) resolveFingerprint(creds *api.CodexCredentials) string {
+	if fingerprint := a.currentFingerprint(); fingerprint != "" {
+		return fingerprint
+	}
+	if creds == nil {
+		return ""
+	}
+	return codexTokenFingerprint(creds.AccessToken, creds.RefreshToken)
+}
+
 // resumeAuth clears all auth pause state after credentials are known good.
 //
 // It deliberately does NOT reset proactiveRefreshFailures. That counter is a
@@ -640,12 +653,8 @@ func (a *CodexAgent) tryRecoveryRefresh(now time.Time, window time.Duration) {
 		return
 	}
 	// The credential-source fingerprint identifies the refresh token for both
-	// the dead-token check and cross-agent dedup. It falls back to the token
-	// digest when no hook is wired.
-	fingerprint := a.currentFingerprint()
-	if fingerprint == "" {
-		fingerprint = codexTokenFingerprint(creds.AccessToken, creds.RefreshToken)
-	}
+	// the dead-token check and cross-agent dedup.
+	fingerprint := a.resolveFingerprint(creds)
 	// A dead refresh token stays dead until the credential source changes.
 	if a.refreshTerminalFingerprint != "" && a.refreshTerminalFingerprint == fingerprint {
 		return
@@ -883,17 +892,20 @@ func (a *CodexAgent) poll(ctx context.Context) {
 
 					newTokens, err := a.refreshCodexToken(ctx, creds.RefreshToken)
 					if err != nil {
-						if errors.Is(err, api.ErrCodexRefreshTokenReused) {
-							// Unrecoverable - token is dead, user must re-authenticate
-							a.logger.Error("Codex refresh token already used - re-authenticate via 'codex auth'",
+						if isCodexRefreshTerminalError(err) {
+							// Unrecoverable - the refresh token is dead (reused,
+							// invalid_grant, or a 401 rejection). Pause at once
+							// rather than counting toward the transient budget.
+							a.refreshTerminalFingerprint = a.resolveFingerprint(creds)
+							a.logger.Error("Codex refresh token is dead - re-authenticate via 'codex auth'",
 								"error", err)
 							if a.pauseAuth(creds.AccessToken) {
-								a.logPausedOnce("Codex proactive refresh PAUSED - refresh token already used")
+								a.logPausedOnce("Codex proactive refresh PAUSED - refresh token rejected")
 							}
 							// Send auth error notification
 							a.sendAuthErrorNotification(
 								"Token Refresh Failed",
-								"Codex refresh token has been reused. Please re-authenticate via 'codex auth' to resume quota tracking.",
+								"Codex refresh token is no longer valid. Please re-authenticate via 'codex auth' to resume quota tracking.",
 								false, // not recoverable
 							)
 						} else {

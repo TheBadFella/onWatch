@@ -109,6 +109,43 @@ func TestRefreshCodexToken_GenericError(t *testing.T) {
 	}
 }
 
+// A bare 401 from the token endpoint (no JSON error body) is the production
+// signature of a dead refresh token and must be terminal, not retryable
+// (issue #147 review, item 2).
+func TestRefreshCodexToken_UnauthorizedIsTerminal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	_, err := RefreshCodexTokenWithURL(context.Background(), "dead-token", server.URL)
+	if err == nil {
+		t.Fatal("expected error for a 401 response")
+	}
+	if !errors.Is(err, ErrCodexRefreshTokenInvalid) {
+		t.Errorf("expected ErrCodexRefreshTokenInvalid, got %v", err)
+	}
+}
+
+// A 5xx from the token endpoint is transient, not terminal.
+func TestRefreshCodexToken_ServerErrorIsTransient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	_, err := RefreshCodexTokenWithURL(context.Background(), "good-token", server.URL)
+	if err == nil {
+		t.Fatal("expected error for a 503 response")
+	}
+	if errors.Is(err, ErrCodexRefreshTokenInvalid) || errors.Is(err, ErrCodexRefreshTokenReused) {
+		t.Errorf("a 503 must be transient, got %v", err)
+	}
+	if !errors.Is(err, ErrCodexOAuthRefreshFailed) {
+		t.Errorf("expected ErrCodexOAuthRefreshFailed, got %v", err)
+	}
+}
+
 func TestRefreshCodexToken_EmptyAccessToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
