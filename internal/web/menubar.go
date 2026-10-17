@@ -768,8 +768,15 @@ func normalizeProviderCard(id, label, subtitle string, payload map[string]interf
 	}
 	status := "healthy"
 	connectionStatus := stringValue(payload, "status")
-	if connectionStatus == "reconnect" || connectionStatus == "stale" {
+	if connectionStatus == "reconnect" || connectionStatus == "stale" || connectionStatus == "paused" {
 		status = "warning"
+	}
+	// A paused account needs re-authentication. Its last snapshot is stale, so
+	// the quota severities under it are not live signal - paused wins (#147).
+	paused, _ := payload["paused"].(bool)
+	if paused {
+		status = "warning"
+		connectionStatus = "paused"
 	}
 	if connection != nil && connection.Reason != "" {
 		status = "warning"
@@ -794,6 +801,10 @@ func normalizeProviderCard(id, label, subtitle string, payload map[string]interf
 			Status: quota.Status,
 			Points: points,
 		})
+	}
+	if paused {
+		// Re-assert after the quota loop so stale severity does not override it.
+		status = "warning"
 	}
 	return &menubar.ProviderCard{
 		ID:               id,

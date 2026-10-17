@@ -2823,11 +2823,11 @@ function syncCodexAutoStartBadges() {
   });
 }
 
-function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote) {
+function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, pause) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const visibleQuotas = filterCodexQuotasForPlan(quotas, planType);
-  const sourceNoteHTML = codexUsageSourceNoteHTML(usageSourceNote);
+  const sourceNoteHTML = codexPauseNoticeHTML(pause) + codexUsageSourceNoteHTML(usageSourceNote);
   if (visibleQuotas.length === 0) {
     container.innerHTML = `${sourceNoteHTML}<p class="empty-state">No Codex quota data available yet.</p>`;
     return;
@@ -2900,8 +2900,19 @@ function codexUsageSourceNoteHTML(note) {
   return `<p class="codex-usage-source-note" role="note">${escapeHTML(note)}</p>`;
 }
 
+// A paused Codex account needs re-authentication: its last snapshot is stale,
+// so flag it instead of rendering the old numbers as live data (issue #147).
+function codexPauseNoticeHTML(payload) {
+  if (!payload || !payload.paused) return '';
+  const reason = payload.pausedReason || 'Polling is paused. Re-authenticate via the Codex CLI to resume.';
+  return `<p class="codex-paused-note" role="note" title="${escapeHTML(reason)}">
+    <span class="status-dot" data-status="warning"></span>
+    Needs re-auth - polling paused
+  </p>`;
+}
+
 // Render Codex cards for a specific account (used in "both" view with multiple accounts)
-function renderCodexQuotaCardsForAccount(quotas, container, accountName, planType, accountId, usageSourceNote, planLabel) {
+function renderCodexQuotaCardsForAccount(quotas, container, accountName, planType, accountId, usageSourceNote, planLabel, pause) {
   const visibleQuotas = filterCodexQuotasForPlan(quotas, planType);
   const safeAccountId = String(accountId || accountName || 'default').replace(/[^a-zA-Z0-9_-]/g, '-');
 
@@ -2912,6 +2923,7 @@ function renderCodexQuotaCardsForAccount(quotas, container, accountName, planTyp
     <span class="codex-account-plan">${escapeHTML(formatCodexPlan(planType, planLabel))}</span>
   `;
   container.appendChild(header);
+  container.insertAdjacentHTML('beforeend', codexPauseNoticeHTML(pause));
   container.insertAdjacentHTML('beforeend', codexUsageSourceNoteHTML(usageSourceNote));
 
   if (visibleQuotas.length === 0) {
@@ -2981,7 +2993,7 @@ function renderCodexAccountSections(accounts) {
     const section = document.createElement('section');
     section.className = 'codex-account-section';
     section.dataset.accountId = String(accountId);
-    renderCodexQuotaCardsForAccount(account.quotas || [], section, accountName, account.planType, accountId, account.usageSourceNote, account.planLabel);
+    renderCodexQuotaCardsForAccount(account.quotas || [], section, accountName, account.planType, accountId, account.usageSourceNote, account.planLabel, account);
     container.appendChild(section);
   });
 }
@@ -4978,8 +4990,9 @@ async function fetchCodexUsage(options = {}) {
     const renderedCount = container.querySelectorAll('.quota-card.codex-card').length;
     const sourceNote = payload.usageSourceNote || '';
     const sourceNoteChanged = (container.querySelector('.codex-usage-source-note')?.textContent || '') !== sourceNote;
-    if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged) {
-      renderCodexQuotaCards(visibleQuotas, 'quota-grid-codex', State.codexPlanType, payload.usageSourceNote);
+    const pausedChanged = (container.querySelector('.codex-paused-note') != null) !== Boolean(payload.paused);
+    if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged) {
+      renderCodexQuotaCards(visibleQuotas, 'quota-grid-codex', State.codexPlanType, payload.usageSourceNote, payload);
     }
 
     visibleQuotas.forEach(q => updateCodexCard(q));

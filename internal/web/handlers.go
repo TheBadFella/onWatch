@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/onllm-dev/onwatch/v2/internal/agent"
 	"github.com/onllm-dev/onwatch/v2/internal/api"
 	"github.com/onllm-dev/onwatch/v2/internal/config"
 	"github.com/onllm-dev/onwatch/v2/internal/menubar"
@@ -92,6 +93,12 @@ type MiniMaxAccountReloader interface {
 	Reload()
 }
 
+// CodexPauseReporter reports which Codex accounts are paused pending
+// re-authentication, keyed by database account ID (issue #147).
+type CodexPauseReporter interface {
+	PausedAccounts() map[int64]agent.CodexPauseState
+}
+
 // Handler handles HTTP requests for the web dashboard
 type Handler struct {
 	store               *store.Store
@@ -125,6 +132,7 @@ type Handler struct {
 	config              *config.Config
 	metrics             *metrics.Metrics
 	version             string
+	codexPauseReporter  CodexPauseReporter
 	menubarSettingsMu   sync.Mutex
 	smtpTestMu          sync.Mutex
 	smtpTestLastSent    time.Time
@@ -137,6 +145,20 @@ type Handler struct {
 
 // DefaultCodexAccountID is the default account ID for single-account setups.
 const DefaultCodexAccountID int64 = 1
+
+// codexSnapshotStaleAfter is how old a Codex snapshot may be before the
+// dashboard marks it stale. The poll interval is one minute, so anything much
+// older means the account is not being polled (paused, orphaned, or offline).
+const codexSnapshotStaleAfter = 15 * time.Minute
+
+// snapshotStale reports whether a snapshot captured at capturedAt is too old to
+// present as live data. A zero capturedAt is treated as not stale.
+func snapshotStale(now, capturedAt time.Time) bool {
+	if capturedAt.IsZero() {
+		return false
+	}
+	return now.Sub(capturedAt) > codexSnapshotStaleAfter
+}
 
 // parseCodexAccountID extracts the account ID from query params, defaulting to 1.
 func parseCodexAccountID(r *http.Request) int64 {
@@ -846,6 +868,21 @@ func (h *Handler) SetRateLimiter(l *LoginRateLimiter) {
 // SetMiniMaxAgentManager sets the MiniMax agent manager for hot-reload on account changes.
 func (h *Handler) SetMiniMaxAgentManager(m MiniMaxAccountReloader) {
 	h.minimaxAgentMgr = m
+}
+
+// SetCodexPauseReporter wires the Codex agent manager so /api/current can flag
+// paused accounts that need re-authentication.
+func (h *Handler) SetCodexPauseReporter(r CodexPauseReporter) {
+	h.codexPauseReporter = r
+}
+
+// codexPauseState returns the pause state for an account, if any.
+func (h *Handler) codexPauseState(accountID int64) (agent.CodexPauseState, bool) {
+	if h.codexPauseReporter == nil {
+		return agent.CodexPauseState{}, false
+	}
+	state, ok := h.codexPauseReporter.PausedAccounts()[accountID]
+	return state, ok && state.Paused
 }
 
 func (h *Handler) triggerMenubarRefresh() {
@@ -9316,6 +9353,22 @@ func (h *Handler) buildCodexCurrent(accountID int64) map[string]interface{} {
 		"capturedAt": now.Format(time.RFC3339),
 		"quotas":     []interface{}{},
 	}
+
+	// A paused account needs re-authentication: surface it explicitly so the UI
+	// can flag it instead of rendering the last snapshot as live data (#147).
+	pauseState, paused := h.codexPauseState(accountID)
+	if paused {
+		response["paused"] = true
+		response["authRequired"] = true
+		response["status"] = "paused"
+		if pauseState.Reason != "" {
+			response["pausedReason"] = pauseState.Reason
+		}
+		if !pauseState.Since.IsZero() {
+			response["pausedSince"] = pauseState.Since.UTC().Format(time.RFC3339)
+		}
+	}
+
 	if h.store == nil {
 		return response
 	}
@@ -9330,6 +9383,11 @@ func (h *Handler) buildCodexCurrent(accountID int64) map[string]interface{} {
 	}
 
 	response["capturedAt"] = latest.CapturedAt.Format(time.RFC3339)
+	// A snapshot whose reset window already passed is stale, not resetting: mark
+	// it so the countdown does not read as a negative "Resetting..." forever.
+	if snapshotStale(now, latest.CapturedAt) {
+		response["isStale"] = true
+	}
 	if latest.PlanType != "" {
 		response["planType"] = latest.PlanType
 		response["planLabel"] = codexPlanLabel(latest.PlanType)
@@ -9384,8 +9442,16 @@ func (h *Handler) buildCodexCurrent(accountID int64) map[string]interface{} {
 		if q.ResetsAt != nil {
 			timeUntilReset := time.Until(*q.ResetsAt)
 			qMap["resetsAt"] = q.ResetsAt.Format(time.RFC3339)
-			qMap["timeUntilReset"] = formatDuration(timeUntilReset)
-			qMap["timeUntilResetSeconds"] = int64(timeUntilReset.Seconds())
+			// Clamp a reset already in the past to 0 so the UI shows an expired
+			// window instead of a negative "Resetting..." countdown (#147).
+			if timeUntilReset < 0 {
+				qMap["timeUntilReset"] = "0m"
+				qMap["timeUntilResetSeconds"] = int64(0)
+				qMap["resetElapsed"] = true
+			} else {
+				qMap["timeUntilReset"] = formatDuration(timeUntilReset)
+				qMap["timeUntilResetSeconds"] = int64(timeUntilReset.Seconds())
+			}
 		}
 		if h.codexTracker != nil {
 			if summary, err := h.codexTracker.UsageSummary(accountID, q.Name); err == nil && summary != nil {

@@ -526,6 +526,21 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 		return profile.Tokens.AccessToken
 	})
 
+	// Credential fingerprint: while paused, a change here means the user
+	// re-authenticated, so the pause lifts without a daemon restart (#147).
+	// Named profiles are scoped to their own file; the default profile follows
+	// whichever system auth file its credentials came from.
+	agent.SetCredentialFingerprint(func() string {
+		if isDefaultProfile {
+			creds := api.DetectCodexCredentials(m.logger)
+			if creds == nil {
+				return ""
+			}
+			return codexTokenFingerprint(creds.AccessToken, creds.RefreshToken)
+		}
+		return codexCredentialFingerprint(profilePath)
+	})
+
 	agent.SetCredentialsRefresh(func() *api.CodexCredentials {
 		if isDefaultProfile {
 			return defaultCredentials()
@@ -820,6 +835,25 @@ func (m *CodexAgentManager) stopAllAgents() {
 			inst.Cancel()
 		}
 	}
+}
+
+// PausedAccounts reports the pause state of every running profile agent keyed
+// by database account ID, so the dashboard can flag accounts that need
+// re-authentication instead of serving stale snapshots as live data (issue #147).
+func (m *CodexAgentManager) PausedAccounts() map[int64]CodexPauseState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	paused := make(map[int64]CodexPauseState)
+	for _, inst := range m.instances {
+		if inst.Agent == nil {
+			continue
+		}
+		if state := inst.Agent.PauseState(); state.Paused {
+			paused[inst.DBAccountID] = state
+		}
+	}
+	return paused
 }
 
 // GetRunningProfiles returns information about currently running profile agents.

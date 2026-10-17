@@ -2,9 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +60,75 @@ type CodexCredentialsRefreshFunc func() *api.CodexCredentials
 // profile it writes to the global CODEX_HOME/auth.json.
 type CodexTokenSaveFunc func(accessToken, refreshToken, idToken string, expiresIn int) error
 
+// CodexCredentialFingerprintFunc returns a stable fingerprint of the credential
+// source the agent polls with (a profile file, or the global Codex/OpenCode
+// auth file). It changes only when the access or refresh token changes, so a
+// re-authentication is distinguishable from onWatch's own bookkeeping rewrites.
+// Empty means the source is unreadable.
+type CodexCredentialFingerprintFunc func() string
+
+// CodexPauseState describes one account whose Codex polling is paused pending
+// re-authentication (or a bounded self-recovery retry).
+type CodexPauseState struct {
+	Paused bool      `json:"paused"`
+	Since  time.Time `json:"since,omitempty"`
+	Reason string    `json:"reason,omitempty"`
+}
+
+// codexTokenFingerprint hashes an access/refresh token pair. It never exposes
+// the token values, only a digest, and is empty when both tokens are absent.
+func codexTokenFingerprint(accessToken, refreshToken string) string {
+	access := strings.TrimSpace(accessToken)
+	refresh := strings.TrimSpace(refreshToken)
+	if access == "" && refresh == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(access + "\x00" + refresh))
+	return hex.EncodeToString(sum[:])
+}
+
+// codexCredentialFingerprint reads a Codex or OpenCode auth file and returns a
+// token digest. Unreadable or malformed files yield an empty fingerprint.
+func codexCredentialFingerprint(path string) string {
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var raw struct {
+		Tokens struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			Access       string `json:"access"`
+			Refresh      string `json:"refresh"`
+		} `json:"tokens"`
+		OpenAI struct {
+			Access  string `json:"access"`
+			Refresh string `json:"refresh"`
+		} `json:"openai"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	access := raw.Tokens.AccessToken
+	if access == "" {
+		access = raw.Tokens.Access
+	}
+	if access == "" {
+		access = raw.OpenAI.Access
+	}
+	refresh := raw.Tokens.RefreshToken
+	if refresh == "" {
+		refresh = raw.Tokens.Refresh
+	}
+	if refresh == "" {
+		refresh = raw.OpenAI.Refresh
+	}
+	return codexTokenFingerprint(access, refresh)
+}
+
 // isCodexAuthError returns true if the error is an authentication/authorization error.
 func isCodexAuthError(err error) bool {
 	return errors.Is(err, api.ErrCodexUnauthorized) || errors.Is(err, api.ErrCodexForbidden)
@@ -62,18 +136,19 @@ func isCodexAuthError(err error) bool {
 
 // CodexAgent manages the background polling loop for Codex quota tracking.
 type CodexAgent struct {
-	client       *api.CodexClient
-	store        *store.Store
-	tracker      *tracker.CodexTracker
-	interval     time.Duration
-	logger       *slog.Logger
-	sm           *SessionManager
-	notifier     *notify.NotificationEngine
-	pollingCheck func() bool
-	tokenRefresh CodexTokenRefreshFunc
-	credsRefresh CodexCredentialsRefreshFunc
-	tokenSave    CodexTokenSaveFunc
-	lastToken    string
+	client                *api.CodexClient
+	store                 *store.Store
+	tracker               *tracker.CodexTracker
+	interval              time.Duration
+	logger                *slog.Logger
+	sm                    *SessionManager
+	notifier              *notify.NotificationEngine
+	pollingCheck          func() bool
+	tokenRefresh          CodexTokenRefreshFunc
+	credsRefresh          CodexCredentialsRefreshFunc
+	tokenSave             CodexTokenSaveFunc
+	credentialFingerprint CodexCredentialFingerprintFunc
+	lastToken             string
 
 	// Multi-account support
 	accountID   int64  // Database account ID from provider_accounts
@@ -84,6 +159,17 @@ type CodexAgent struct {
 	authPaused               bool
 	lastFailedToken          string
 	proactiveRefreshFailures int // consecutive proactive refresh failures (non-reused-token)
+
+	// authPausedAt is when the current pause began, and authPauseLogged tracks
+	// whether the pause notice has been emitted for it, so the message is
+	// logged on the state change instead of on every tick.
+	authPausedAt    time.Time
+	authPauseLogged bool
+
+	// lastFailedFingerprint is the credential fingerprint at the moment polling
+	// was paused. A different fingerprint while paused means the user
+	// re-authenticated, which lifts the pause.
+	lastFailedFingerprint string
 
 	// Bounded self-recovery while authPaused: authRetryAt is when the next
 	// recovery poll is allowed and authRetryCount drives the escalating backoff.
@@ -331,12 +417,30 @@ func (a *CodexAgent) currentTime() time.Time {
 // pauseAuth stops polling after repeated auth failures and schedules the first
 // bounded self-recovery attempt. An already scheduled retry is preserved so a
 // failed recovery keeps escalating instead of restarting at the base interval.
-func (a *CodexAgent) pauseAuth(failedToken string) {
+// It reports whether this call newly entered the paused state, so callers can
+// log the transition once instead of on every tick.
+func (a *CodexAgent) pauseAuth(failedToken string) bool {
+	newlyPaused := !a.authPaused
+	if newlyPaused {
+		a.authPausedAt = a.currentTime()
+		a.authPauseLogged = false
+		a.lastFailedFingerprint = a.currentFingerprint()
+	}
 	a.authPaused = true
 	a.lastFailedToken = failedToken
 	if a.authRetryAt.IsZero() {
 		a.authRetryAt = a.currentTime().Add(codexAuthPausedRetryInterval)
 	}
+	return newlyPaused
+}
+
+// currentFingerprint returns the credential source digest, or empty when no
+// fingerprint hook is wired or the source is unreadable.
+func (a *CodexAgent) currentFingerprint() string {
+	if a.credentialFingerprint == nil {
+		return ""
+	}
+	return a.credentialFingerprint()
 }
 
 // resumeAuth clears all auth pause state after credentials are known good.
@@ -346,6 +450,64 @@ func (a *CodexAgent) resumeAuth() {
 	a.lastFailedToken = ""
 	a.authRetryAt = time.Time{}
 	a.authRetryCount = 0
+	a.authPausedAt = time.Time{}
+	a.authPauseLogged = false
+	a.lastFailedFingerprint = ""
+}
+
+// logPausedOnce emits the pause notice on the transition into the paused
+// state, so a permanently paused agent does not log the same message every
+// tick (issue #147). Only the first caller after pauseAuth wins.
+func (a *CodexAgent) logPausedOnce(message string) {
+	if a.authPauseLogged {
+		return
+	}
+	a.authPauseLogged = true
+	a.logger.Error(message,
+		"failure_count", max(a.authFailCount, a.proactiveRefreshFailures),
+		"action", "Re-authenticate via 'codex auth' to resume polling",
+		"account_id", a.accountID)
+}
+
+// AuthPaused reports whether polling is currently paused pending
+// re-authentication. Safe to call from the web layer.
+func (a *CodexAgent) AuthPaused() bool {
+	return a.authPaused
+}
+
+// PauseState reports the pause state for API surfacing. Since is the time the
+// current pause began (zero when not paused).
+func (a *CodexAgent) PauseState() CodexPauseState {
+	if !a.authPaused {
+		return CodexPauseState{}
+	}
+	return CodexPauseState{
+		Paused: true,
+		Since:  a.authPausedAt,
+		Reason: "Codex polling is paused after repeated authentication failures. Re-authenticate via 'codex auth' to resume.",
+	}
+}
+
+// SetCredentialFingerprint wires a callback that returns a digest of the
+// credential source. While paused, a change in the fingerprint means the user
+// re-authenticated, so the pause is lifted and polling resumes immediately
+// (issue #147).
+func (a *CodexAgent) SetCredentialFingerprint(fn CodexCredentialFingerprintFunc) {
+	a.credentialFingerprint = fn
+}
+
+// credentialsChanged reports whether the credential source differs from the
+// one that failed. Returns false when no fingerprint hook is wired or the
+// source is unreadable, so an unknown state never silently lifts a pause.
+func (a *CodexAgent) credentialsChanged() bool {
+	if a.credentialFingerprint == nil {
+		return false
+	}
+	current := a.credentialFingerprint()
+	if current == "" {
+		return false
+	}
+	return current != a.lastFailedFingerprint
 }
 
 // codexAuthRetryBackoff returns the delay before the nth paused-state recovery
@@ -544,8 +706,19 @@ func (a *CodexAgent) poll(ctx context.Context) {
 		return
 	}
 
-	// Proactive OAuth refresh: check if token expires soon and refresh via OAuth API
-	if a.credsRefresh != nil {
+	// While paused, a change in the credential source means the user
+	// re-authenticated: lift the pause and poll again immediately (issue #147).
+	// This runs before any OAuth refresh so a paused agent never hits the token
+	// endpoint with a dead refresh token.
+	if a.authPaused && a.credentialsChanged() {
+		a.resumeAuth()
+		a.logger.Info("Codex auth failure pause lifted - new credentials detected", "account_id", a.accountID)
+	}
+
+	// Proactive OAuth refresh: check if token expires soon and refresh via OAuth API.
+	// Skipped entirely while paused: the refresh token that just failed must not
+	// be replayed every tick against the OAuth endpoint (issue #147).
+	if a.credsRefresh != nil && !a.authPaused {
 		if creds := a.credsRefresh(); creds != nil {
 			// Check if token is expiring soon or already expired
 			if creds.IsExpiringSoon(codexTokenRefreshThreshold) && creds.RefreshToken != "" {
@@ -561,7 +734,9 @@ func (a *CodexAgent) poll(ctx context.Context) {
 							// Unrecoverable - token is dead, user must re-authenticate
 							a.logger.Error("Codex refresh token already used - re-authenticate via 'codex auth'",
 								"error", err)
-							a.pauseAuth(creds.AccessToken)
+							if a.pauseAuth(creds.AccessToken) {
+								a.logPausedOnce("Codex proactive refresh PAUSED - refresh token already used")
+							}
 							// Send auth error notification
 							a.sendAuthErrorNotification(
 								"Token Refresh Failed",
@@ -574,10 +749,9 @@ func (a *CodexAgent) poll(ctx context.Context) {
 								"error", err,
 								"consecutive_failures", a.proactiveRefreshFailures)
 							if a.proactiveRefreshFailures >= maxCodexAuthFailures {
-								a.pauseAuth(creds.AccessToken)
-								a.logger.Error("Codex proactive refresh PAUSED - too many consecutive failures",
-									"failure_count", a.proactiveRefreshFailures,
-									"action", "Re-authenticate via 'codex auth' to resume polling")
+								if a.pauseAuth(creds.AccessToken) {
+									a.logPausedOnce("Codex proactive refresh PAUSED - too many consecutive failures")
+								}
 								a.sendAuthErrorNotification(
 									"Token Refresh Failed",
 									fmt.Sprintf("Codex proactive OAuth refresh failed %d times. Please re-authenticate via 'codex auth' to resume.", a.proactiveRefreshFailures),
@@ -621,12 +795,13 @@ func (a *CodexAgent) poll(ctx context.Context) {
 			a.client.SetToken(newToken)
 			a.lastToken = newToken
 			a.logger.Info("Codex token refreshed from credentials")
+		}
 
-			// If we were paused due to auth failures and credentials changed, resume.
-			if a.authPaused && newToken != a.lastFailedToken {
-				a.resumeAuth()
-				a.logger.Info("Codex auth failure pause lifted - new credentials detected")
-			}
+		// A token that differs from the one that failed is also a
+		// re-authentication signal, independent of the fingerprint hook.
+		if a.authPaused && newToken != "" && newToken != a.lastFailedToken {
+			a.resumeAuth()
+			a.logger.Info("Codex auth failure pause lifted - new credentials detected", "account_id", a.accountID)
 		}
 	}
 
@@ -665,10 +840,9 @@ func (a *CodexAgent) poll(ctx context.Context) {
 							"max_failures", maxCodexAuthFailures)
 
 						if a.authFailCount >= maxCodexAuthFailures {
-							a.pauseAuth(retryToken)
-							a.logger.Error("Codex polling PAUSED due to repeated auth failures",
-								"failure_count", a.authFailCount,
-								"action", "Re-authenticate Codex to resume polling")
+							if a.pauseAuth(retryToken) {
+								a.logPausedOnce("Codex polling PAUSED due to repeated auth failures")
+							}
 							// Send auth error notification
 							a.sendAuthErrorNotification(
 								"Authentication Failed",

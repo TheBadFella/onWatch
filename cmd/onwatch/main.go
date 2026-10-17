@@ -2023,6 +2023,9 @@ func run() error {
 	if minimaxMgr != nil {
 		handler.SetMiniMaxAgentManager(minimaxMgr)
 	}
+	if codexMgr != nil {
+		handler.SetCodexPauseReporter(codexMgr)
+	}
 	updater := update.NewUpdater(version, logger)
 	handler.SetUpdater(updater)
 

@@ -2581,7 +2581,7 @@
                         <div class="provider-copy">
                             <span class="provider-icon ${escapeHTML(providerIconClass(provider))}" aria-hidden="true"></span>
                             <span class="provider-name">${escapeHTML(provider.label)}</span>
-                            ${provider.connection?.reason === 'browser_access_denied' ? '<span class="quota-source-tag">Browser access required</span>' : provider.connection_status === 'reconnect' ? '<span class="quota-source-tag">Reconnect required</span>' : provider.connection_status === 'stale' ? '<span class="quota-source-tag">Updates unavailable</span>' : ''}
+                            ${provider.connection?.reason === 'browser_access_denied' ? '<span class="quota-source-tag">Browser access required</span>' : provider.connection_status === 'reconnect' ? '<span class="quota-source-tag">Reconnect required</span>' : provider.connection_status === 'stale' ? '<span class="quota-source-tag">Updates unavailable</span>' : provider.connection_status === 'paused' ? '<span class="quota-source-tag">Re-auth required</span>' : ''}
                             ${provider.promo ? `<a class="promo-tag ${isPromoOffPeak(provider.promo) ? 'promo-offpeak' : 'promo-peak'}" href="https://www.reddit.com/r/ClaudeAI/comments/1s4idaq/update_on_session_limits/" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${escapeHTML(promoLabel(provider.promo))}</a>` : ''}
                         </div>
                         <span class="provider-updated">${escapeHTML(compactUpdatedLabel(provider.updated_at))}</span>
