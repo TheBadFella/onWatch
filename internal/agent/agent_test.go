@@ -118,14 +118,21 @@ func TestAgent_PollsAtInterval(t *testing.T) {
 	// without violating it.
 	start := time.Now()
 	waitUntil(t, 10*time.Second, func() bool { return callCount.Load() >= 4 }, "at least 4 interval polls")
+	// Snapshot the count and elapsed time together, then cancel.
+	count := callCount.Load()
 	elapsed := time.Since(start)
 	cancel()
 
-	// Four polls (one immediate plus three interval ticks) cannot arrive
-	// meaningfully faster than three intervals; catching a runaway loop here
-	// keeps the lower-bound relaxation from masking a real regression.
+	// Lower bound: four polls cannot arrive faster than three intervals, so a
+	// busy loop that ignores the interval still fails.
 	if elapsed < 2*interval {
 		t.Errorf("4 polls arrived in %v, faster than the %v interval allows (busy loop?)", elapsed, interval)
+	}
+	// Upper bound: over the actual elapsed time, the immediate poll plus one per
+	// interval (with slack for scheduling jitter) is the ceiling. This still
+	// catches an over-polling regression without being timing-fragile.
+	if maxPolls := int(elapsed/interval) + 2; int(count) > maxPolls {
+		t.Errorf("got %d polls in %v with %v interval, want at most %d (over-polling?)", count, elapsed, interval, maxPolls)
 	}
 
 	select {
@@ -473,9 +480,11 @@ func TestAgent_FirstPollImmediate(t *testing.T) {
 	go agent.Run(ctx)
 
 	// Poll for the first call rather than sleeping a fixed window. The property
-	// under test is that the first poll is immediate (well before the 500ms
-	// interval), not that a loaded runner schedules it within a hard 50ms.
+	// under test is that the first poll is immediate, i.e. not gated on the
+	// interval tick.
 	waitUntil(t, 10*time.Second, func() bool { return callCount.Load() >= 1 }, "immediate first poll")
+	count := callCount.Load()
+	elapsed := time.Since(startTime)
 	cancel()
 
 	mu.Lock()
@@ -483,11 +492,16 @@ func TestAgent_FirstPollImmediate(t *testing.T) {
 	copy(times, callTimes)
 	mu.Unlock()
 	if len(times) > 0 {
-		// Generous bound: still proves immediacy (the interval is 500ms) while
-		// tolerating scheduler latency on a loaded CI runner.
-		if timeToFirstCall := times[0].Sub(startTime); timeToFirstCall > 250*time.Millisecond {
-			t.Errorf("First poll should be immediate (<250ms, interval is 500ms), took %v", timeToFirstCall)
+		// Immediacy is a property relative to the interval: the first poll must
+		// arrive before the 500ms tick would have fired, not within a hard 50ms.
+		if timeToFirstCall := times[0].Sub(startTime); timeToFirstCall >= 500*time.Millisecond {
+			t.Errorf("First poll should be immediate (before the 500ms interval), took %v", timeToFirstCall)
 		}
+	}
+	// Over-polling ceiling over the actual elapsed time: the immediate poll plus
+	// one per interval (with slack) is the maximum.
+	if maxPolls := int(elapsed/(500*time.Millisecond)) + 2; int(count) > maxPolls {
+		t.Errorf("got %d polls in %v with a 500ms interval, want at most %d (over-polling?)", count, elapsed, maxPolls)
 	}
 }
 

@@ -127,15 +127,22 @@ func TestAnthropicAgent_Run_PollsAtInterval(t *testing.T) {
 	// Wait for the interval-driven polls instead of asserting against a fixed
 	// wall-clock window: a loaded CI runner can starve the ticker for seconds
 	// without violating the property under test.
+	const interval = 50 * time.Millisecond
 	start := time.Now()
 	waitUntil(t, 10*time.Second, func() bool { return callCount.Load() >= 4 }, "at least 4 interval polls")
+	count := callCount.Load()
 	elapsed := time.Since(start)
 	cancel()
 
 	// Four polls cannot arrive faster than three intervals; this keeps the
 	// lower-bound relaxation from masking a busy loop.
-	if elapsed < 2*50*time.Millisecond {
-		t.Errorf("4 polls arrived in %v, faster than the 50ms interval allows (busy loop?)", elapsed)
+	if elapsed < 2*interval {
+		t.Errorf("4 polls arrived in %v, faster than the %v interval allows (busy loop?)", elapsed, interval)
+	}
+	// Over the actual elapsed time, the immediate poll plus one per interval
+	// (with slack) is the ceiling; this still catches over-polling.
+	if maxPolls := int(elapsed/interval) + 2; int(count) > maxPolls {
+		t.Errorf("got %d polls in %v with %v interval, want at most %d (over-polling?)", count, elapsed, interval, maxPolls)
 	}
 
 	select {
