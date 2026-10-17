@@ -775,6 +775,15 @@
             font-variant-numeric: tabular-nums;
         }
 
+        /* Three digits would touch the ring stroke at the default size. */
+        .quota-ring-pct.is-wide {
+            font-size: calc(var(--ring-size, 58px) * 0.225);
+        }
+
+        .quota-ring-pct.is-wide .quota-ring-unit {
+            font-size: calc(var(--ring-size, 58px) * 0.13);
+        }
+
         .quota-ring-unit {
             font-size: calc(var(--ring-size, 58px) * 0.155);
             font-weight: 700;
@@ -2532,7 +2541,7 @@
                             <circle class="quota-fill" cx="20" cy="20" r="15.5" stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}"></circle>
                         </svg>
                         <span class="quota-ring-center">
-                            <span class="quota-ring-pct">${Math.round(percent)}<span class="quota-ring-unit">%</span></span>
+                            <span class="quota-ring-pct${Math.round(percent) >= 100 ? ' is-wide' : ''}">${Math.round(percent)}<span class="quota-ring-unit">%</span></span>
                             <span class="quota-ring-reset" title="${escapeHTML(resetTitle)}">${escapeHTML(reset)}</span>
                         </span>
                     </div>
