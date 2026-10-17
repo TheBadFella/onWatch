@@ -60,6 +60,10 @@ type CodexCredentialsRefreshFunc func() *api.CodexCredentials
 // profile it writes to the global CODEX_HOME/auth.json.
 type CodexTokenSaveFunc func(accessToken, refreshToken, idToken string, expiresIn int) error
 
+// codexOAuthRefreshFunc performs the OAuth token refresh. Production uses
+// api.RefreshCodexToken; tests inject a fake so no real refresh is attempted.
+type codexOAuthRefreshFunc func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error)
+
 // CodexCredentialFingerprintFunc returns a stable fingerprint of the credential
 // source the agent polls with (a profile file, or the global Codex/OpenCode
 // auth file). It changes only when the access or refresh token changes, so a
@@ -148,6 +152,7 @@ type CodexAgent struct {
 	credsRefresh          CodexCredentialsRefreshFunc
 	tokenSave             CodexTokenSaveFunc
 	credentialFingerprint CodexCredentialFingerprintFunc
+	oauthRefresh          codexOAuthRefreshFunc
 	lastToken             string
 
 	// Multi-account support
@@ -603,6 +608,15 @@ func (a *CodexAgent) SetTokenSave(fn CodexTokenSaveFunc) {
 	a.tokenSave = fn
 }
 
+// refreshCodexToken performs the proactive OAuth refresh, using the injected
+// seam when present so tests never reach the real endpoint.
+func (a *CodexAgent) refreshCodexToken(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error) {
+	if a.oauthRefresh != nil {
+		return a.oauthRefresh(ctx, refreshToken)
+	}
+	return api.RefreshCodexToken(ctx, refreshToken)
+}
+
 // sendStarterPing sends a minimal Codex generation request to "start" the given
 // limit windows after a reset (auto quota-starter, Beta). Failures are logged,
 // never fatal, and not retried here - the next polls retry a window that is
@@ -728,7 +742,7 @@ func (a *CodexAgent) poll(ctx context.Context) {
 					a.logger.Info("Codex token expiring soon, attempting proactive OAuth refresh",
 						"expires_in", creds.ExpiresIn.Round(time.Second))
 
-					newTokens, err := api.RefreshCodexToken(ctx, creds.RefreshToken)
+					newTokens, err := a.refreshCodexToken(ctx, creds.RefreshToken)
 					if err != nil {
 						if errors.Is(err, api.ErrCodexRefreshTokenReused) {
 							// Unrecoverable - token is dead, user must re-authenticate

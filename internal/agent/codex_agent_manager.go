@@ -239,7 +239,12 @@ func (m *CodexAgentManager) loadAndStartProfile(path string) error {
 
 func codexCredentialsFromProfile(profile CodexProfile) *api.CodexCredentials {
 	idToken := strings.TrimSpace(profile.Tokens.IDToken)
-	expiresAt := api.ParseIDTokenExpiry(idToken)
+	accessToken := strings.TrimSpace(profile.Tokens.AccessToken)
+	// Same rule as the global auth.json loader: the access token is the source
+	// of truth, the id_token is only a fallback. Using the id_token here marked
+	// valid profiles as expiring, so the agent refreshed spuriously and paused
+	// (issue #147).
+	expiresAt := api.CodexTokenExpiry(accessToken, idToken)
 	var expiresIn time.Duration
 	if !expiresAt.IsZero() {
 		expiresIn = time.Until(expiresAt)
@@ -251,7 +256,7 @@ func codexCredentialsFromProfile(profile CodexProfile) *api.CodexCredentials {
 	}
 
 	return &api.CodexCredentials{
-		AccessToken:  strings.TrimSpace(profile.Tokens.AccessToken),
+		AccessToken:  accessToken,
 		RefreshToken: strings.TrimSpace(profile.Tokens.RefreshToken),
 		IDToken:      idToken,
 		APIKey:       strings.TrimSpace(profile.APIKey),

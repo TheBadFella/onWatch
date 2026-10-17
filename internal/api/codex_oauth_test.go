@@ -227,3 +227,41 @@ func TestParseIDTokenUserID_EmptyToken(t *testing.T) {
 		t.Fatalf("ParseIDTokenUserID() = %q, want empty", userID)
 	}
 }
+
+// makeExpJWT builds a minimal unsigned JWT carrying only an exp claim.
+func makeExpJWT(t *testing.T, exp time.Time) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]int64{"exp": exp.Unix()})
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	body := base64.RawURLEncoding.EncodeToString(payload)
+	return header + "." + body + "."
+}
+
+// The access token is the source of truth for Codex credential expiry. An
+// id_token that expires sooner must not win (issue #147).
+func TestCodexTokenExpiry_PrefersAccessToken(t *testing.T) {
+	access := makeExpJWT(t, time.Unix(1893456000, 0))
+	id := makeExpJWT(t, time.Unix(1000000000, 0))
+
+	if got := CodexTokenExpiry(access, id); !got.Equal(time.Unix(1893456000, 0)) {
+		t.Fatalf("CodexTokenExpiry = %v, want the access token expiry", got)
+	}
+}
+
+// An unparseable access token falls back to the id_token expiry.
+func TestCodexTokenExpiry_FallsBackToIDToken(t *testing.T) {
+	id := makeExpJWT(t, time.Unix(1893456000, 0))
+
+	if got := CodexTokenExpiry("opaque-token", id); !got.Equal(time.Unix(1893456000, 0)) {
+		t.Fatalf("CodexTokenExpiry = %v, want the id token expiry", got)
+	}
+}
+
+func TestCodexTokenExpiry_BothUnparseable(t *testing.T) {
+	if got := CodexTokenExpiry("opaque", "also-opaque"); !got.IsZero() {
+		t.Fatalf("CodexTokenExpiry = %v, want zero", got)
+	}
+}
