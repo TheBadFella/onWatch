@@ -79,7 +79,7 @@ func TestFixExplicitDBPath_FlagSmallerFileKept(t *testing.T) {
 func TestFixExplicitDBPath_EnvAbsolutePathKept(t *testing.T) {
 	_, canonical := withCanonicalDB(t)
 	explicit := filepath.Join(t.TempDir(), "iso.db") // does not exist
-	setTestArgs(t, []string{"onwatch"})               // no --db flag
+	setTestArgs(t, []string{"onwatch"})              // no --db flag
 
 	cfg := &config.Config{DBPath: explicit, DBPathExplicit: true}
 	fixExplicitDBPath(cfg, testLogger())
