@@ -59,7 +59,21 @@ type CodexCredentialsRefreshFunc func() *api.CodexCredentials
 // CodexTokenSaveFunc saves refreshed OAuth tokens to the appropriate storage.
 // For named profiles this writes to the profile JSON file; for the default
 // profile it writes to the global CODEX_HOME/auth.json.
-type CodexTokenSaveFunc func(accessToken, refreshToken, idToken string, expiresIn int) error
+//
+// previousRefreshToken is the refresh token that the refresh just consumed (the
+// pre-refresh one). A named profile can share that token with a system auth file
+// (~/.codex/auth.json or OpenCode), so the save path uses it to write the
+// rotation back to every file that still holds it. Passing the consumed token
+// keeps the rule stateless: it covers every refresh, not only one that borrowed
+// the credential this poll.
+type CodexTokenSaveFunc func(accessToken, refreshToken, idToken string, expiresIn int, previousRefreshToken string) error
+
+// writeCodexCredentialsNoPrevious is the nil-tokenSave fallback. It writes to
+// the default auth.json path with no previous-token compare-and-swap, matching
+// the legacy behaviour for callers that never installed a save hook.
+func writeCodexCredentialsNoPrevious(accessToken, refreshToken, idToken string, expiresIn int, _ string) error {
+	return api.WriteCodexCredentials(accessToken, refreshToken, idToken, expiresIn)
+}
 
 // codexOAuthRefreshFunc performs the OAuth token refresh. Production uses
 // api.RefreshCodexToken; tests inject a fake so no real refresh is attempted.
@@ -695,9 +709,9 @@ func (a *CodexAgent) tryRecoveryRefresh(ctx context.Context, now time.Time, wind
 	// Persist immediately: refresh tokens are one-time use.
 	saveFn := a.tokenSave
 	if saveFn == nil {
-		saveFn = api.WriteCodexCredentials
+		saveFn = writeCodexCredentialsNoPrevious
 	}
-	if err := saveFn(newTokens.AccessToken, newTokens.RefreshToken, newTokens.IDToken, newTokens.ExpiresIn); err != nil {
+	if err := saveFn(newTokens.AccessToken, newTokens.RefreshToken, newTokens.IDToken, newTokens.ExpiresIn, creds.RefreshToken); err != nil {
 		a.logger.Error("Failed to save recovery-refreshed Codex credentials", "error", err, "account_id", a.accountID)
 		return
 	}
@@ -952,9 +966,9 @@ func (a *CodexAgent) poll(ctx context.Context) {
 						// CRITICAL: Save new tokens to disk IMMEDIATELY (refresh tokens are one-time use!)
 						saveFn := a.tokenSave
 						if saveFn == nil {
-							saveFn = api.WriteCodexCredentials // fallback for backward compat
+							saveFn = writeCodexCredentialsNoPrevious // fallback for backward compat
 						}
-						if err := saveFn(newTokens.AccessToken, newTokens.RefreshToken, newTokens.IDToken, newTokens.ExpiresIn); err != nil {
+						if err := saveFn(newTokens.AccessToken, newTokens.RefreshToken, newTokens.IDToken, newTokens.ExpiresIn, creds.RefreshToken); err != nil {
 							a.logger.Error("Failed to save refreshed Codex credentials", "error", err)
 						} else {
 							a.client.SetToken(newTokens.AccessToken)

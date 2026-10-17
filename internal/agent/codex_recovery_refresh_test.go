@@ -71,12 +71,12 @@ func newRecoveryRefreshAgent(t *testing.T, expiry time.Duration, acceptAccess st
 		resp, err := refresh(ctx, refreshToken)
 		if err == nil && resp != nil {
 			// The seam's success is only "real" once persisted, matching prod.
-			_ = ag.tokenSave(resp.AccessToken, resp.RefreshToken, resp.IDToken, resp.ExpiresIn)
+			_ = ag.tokenSave(resp.AccessToken, resp.RefreshToken, resp.IDToken, resp.ExpiresIn, refreshToken)
 		}
 		return resp, err
 	}
 	// Model the credential file write the recovery refresh performs.
-	ag.SetTokenSave(func(accessToken, refreshToken, idToken string, expiresIn int) error {
+	ag.SetTokenSave(func(accessToken, refreshToken, idToken string, expiresIn int, _ string) error {
 		holder.Store(&api.CodexCredentials{
 			AccessToken:  accessToken,
 			RefreshToken: refreshToken,
