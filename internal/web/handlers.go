@@ -1164,31 +1164,100 @@ func (h *Handler) providerVisibilityMap() map[string]map[string]bool {
 	return vis
 }
 
+// isProviderConfigured reports whether a provider has credentials. The config
+// fields are read under a short read lock; any detection (keychain reads, the
+// 2s Antigravity probe, the MiniMax store query) runs outside the lock, so a
+// slow probe never blocks a settings save.
 func (h *Handler) isProviderConfigured(provider string) bool {
 	if h.config == nil {
 		return false
 	}
+	h.config.ReadLock()
+	configured, needsDetect := h.providerConfiguredFromConfig(provider)
+	h.config.ReadUnlock()
+	if configured || !needsDetect {
+		return configured
+	}
+	return h.providerConfiguredByDetection(provider)
+}
+
+// providerConfiguredFromConfig evaluates the config-only half of the check
+// while the caller holds the read lock. needsDetect is true when a false result
+// may still be resolved by detection outside the lock.
+func (h *Handler) providerConfiguredFromConfig(provider string) (configured, needsDetect bool) {
 	switch provider {
 	case "anthropic":
-		return strings.TrimSpace(h.config.AnthropicToken) != "" || strings.TrimSpace(api.DetectAnthropicToken(h.logger)) != ""
+		return strings.TrimSpace(h.config.AnthropicToken) != "", true
 	case "synthetic":
-		return strings.TrimSpace(h.config.SyntheticAPIKey) != ""
+		return strings.TrimSpace(h.config.SyntheticAPIKey) != "", false
 	case "zai":
-		return strings.TrimSpace(h.config.ZaiAPIKey) != ""
+		return strings.TrimSpace(h.config.ZaiAPIKey) != "", false
 	case "copilot":
-		return strings.TrimSpace(h.config.CopilotToken) != ""
+		return strings.TrimSpace(h.config.CopilotToken) != "", false
 	case "codex":
-		return strings.TrimSpace(h.config.CodexToken) != "" || strings.TrimSpace(api.DetectCodexToken(h.logger)) != ""
+		return strings.TrimSpace(h.config.CodexToken) != "", true
 	case "antigravity":
-		if h.config.AntigravityEnabled {
-			return true
+		return h.config.AntigravityEnabled, true
+	case "minimax":
+		return strings.TrimSpace(h.config.MiniMaxAPIKey) != "", true
+	case "openrouter":
+		return strings.TrimSpace(h.config.OpenRouterAPIKey) != "", false
+	case "moonshot":
+		return strings.TrimSpace(h.config.MoonshotAPIKey) != "", false
+	case "deepseek":
+		return strings.TrimSpace(h.config.DeepSeekAPIKey) != "", false
+	case "gemini":
+		return h.config.GeminiEnabled, false
+	case "cursor":
+		return strings.TrimSpace(h.config.CursorToken) != "", true
+	case "grok":
+		return h.config.GrokEnabled || strings.TrimSpace(h.config.GrokToken) != "", true
+	case "kimi":
+		return strings.TrimSpace(h.config.KimiToken) != "" || h.config.KimiEnabled, true
+	case "mistral":
+		return h.config.HasProviderLocked("mistral"), false
+	case "opencode":
+		return h.config.OpenCodeGoConfiguredLocked(), false
+	case "ollama":
+		return strings.TrimSpace(h.config.OllamaAPIKey) != "", false
+	case "muse":
+		// MUSE_ENABLED=false is an explicit opt-out and wins over everything,
+		// including a key that is present in the environment.
+		if h.config.MuseDisabled {
+			return false, false
 		}
+		return h.config.MuseEnabled || strings.TrimSpace(h.config.MuseAPIKey) != "", true
+	case "commandcode":
+		// COMMANDCODE_ENABLED=false is an explicit opt-out and wins over
+		// everything, including a key that is present in the environment.
+		if h.config.CommandCodeDisabled {
+			return false, false
+		}
+		return h.config.CommandCodeEnabled || strings.TrimSpace(h.config.CommandCodeAPIKey) != "", true
+	default:
+		return false, false
+	}
+}
+
+// testHookBeforeDetect, when set, runs at the start of credential detection.
+// Tests use it to prove detection runs without the config lock held.
+var testHookBeforeDetect func(provider string)
+
+// providerConfiguredByDetection runs credential detection without holding the
+// config lock.
+func (h *Handler) providerConfiguredByDetection(provider string) bool {
+	if testHookBeforeDetect != nil {
+		testHookBeforeDetect(provider)
+	}
+	switch provider {
+	case "anthropic":
+		return strings.TrimSpace(api.DetectAnthropicToken(h.logger)) != ""
+	case "codex":
+		return strings.TrimSpace(api.DetectCodexToken(h.logger)) != ""
+	case "antigravity":
 		return h.detectAntigravityConnection() != nil
 	case "minimax":
-		// Configured if any active MiniMax accounts have API keys, or legacy env var is set
-		if strings.TrimSpace(h.config.MiniMaxAPIKey) != "" {
-			return true
-		}
+		// Configured if any active MiniMax accounts have API keys.
 		if h.store != nil {
 			if accounts, err := h.store.QueryActiveProviderAccounts("minimax"); err == nil {
 				for _, acc := range accounts {
@@ -1199,62 +1268,18 @@ func (h *Handler) isProviderConfigured(provider string) bool {
 			}
 		}
 		return false
-	case "openrouter":
-		return strings.TrimSpace(h.config.OpenRouterAPIKey) != ""
-	case "moonshot":
-		return strings.TrimSpace(h.config.MoonshotAPIKey) != ""
-	case "deepseek":
-		return strings.TrimSpace(h.config.DeepSeekAPIKey) != ""
-	case "gemini":
-		return h.config.GeminiEnabled
 	case "cursor":
-		return strings.TrimSpace(h.config.CursorToken) != "" || strings.TrimSpace(api.DetectCursorToken(h.logger)) != ""
+		return strings.TrimSpace(api.DetectCursorToken(h.logger)) != ""
 	case "grok":
-		if h.config.GrokEnabled || strings.TrimSpace(h.config.GrokToken) != "" {
-			return true
-		}
-		if creds := api.DetectGrokCredentials(h.logger); creds != nil && strings.TrimSpace(creds.AccessToken) != "" {
-			return true
-		}
-		return false
+		creds := api.DetectGrokCredentials(h.logger)
+		return creds != nil && strings.TrimSpace(creds.AccessToken) != ""
 	case "kimi":
-		if h.config != nil && (strings.TrimSpace(h.config.KimiToken) != "" || h.config.KimiEnabled) {
-			return true
-		}
 		return api.DetectKimiCredentials(h.logger) != nil
-	case "mistral":
-		return h.config != nil && h.config.HasProvider("mistral")
-	case "opencode":
-		return h.config != nil && h.config.OpenCodeGoConfigured()
-	case "ollama":
-		return h.config != nil && strings.TrimSpace(h.config.OllamaAPIKey) != ""
 	case "muse":
-		if h.config == nil {
-			return false
-		}
-		// MUSE_ENABLED=false is an explicit opt-out and wins over everything,
-		// including a key that is present in the environment.
-		if h.config.MuseDisabled {
-			return false
-		}
-		if h.config.MuseEnabled || strings.TrimSpace(h.config.MuseAPIKey) != "" {
-			return true
-		}
 		// Cached: detection can shell out to the keychain with a multi-second
 		// deadline, and this runs on every provider-list request.
 		return api.DetectMuseCredentialsCached(h.logger) != nil
 	case "commandcode":
-		if h.config == nil {
-			return false
-		}
-		// COMMANDCODE_ENABLED=false is an explicit opt-out and wins over
-		// everything, including a key that is present in the environment.
-		if h.config.CommandCodeDisabled {
-			return false
-		}
-		if h.config.CommandCodeEnabled || strings.TrimSpace(h.config.CommandCodeAPIKey) != "" {
-			return true
-		}
 		// Reading a few small JSON files, so no cache is needed.
 		return api.DetectCommandCodeCredentials(h.logger) != nil
 	default:
@@ -1308,6 +1333,10 @@ func (h *Handler) setProviderVisibility(provider string, polling, dashboard *boo
 	return h.saveProviderVisibility(vis)
 }
 
+// tryAutoDetect probes for local credentials and, on success, records them in
+// the live config. Detection (keychain reads, the 2s Antigravity network probe)
+// runs WITHOUT the config lock, so a slow probe never blocks a settings save or
+// an agent factory; only the field assignments take the write lock.
 func (h *Handler) tryAutoDetect(provider string) bool {
 	if h.config == nil {
 		return false
@@ -1334,30 +1363,46 @@ func (h *Handler) tryAutoDetect(provider string) bool {
 		if err != nil || h.store.SetSetting("provider_settings", string(data)) != nil {
 			return false
 		}
-		h.config.MistralEnabled = true
-		h.config.MistralDisabled = false
+		h.config.WithWrite(func() {
+			h.config.MistralEnabled = true
+			h.config.MistralDisabled = false
+		})
 		return true
 
 	case "anthropic":
-		if token := strings.TrimSpace(api.DetectAnthropicToken(h.logger)); token != "" {
+		token := strings.TrimSpace(api.DetectAnthropicToken(h.logger))
+		if token == "" {
+			return false
+		}
+		h.config.WithWrite(func() {
 			h.config.AnthropicToken = token
 			h.config.AnthropicAutoToken = true
-			return true
-		}
+		})
+		return true
 	case "codex":
-		if creds := api.DetectCodexCredentials(h.logger); creds != nil && strings.TrimSpace(creds.AccessToken) != "" {
-			h.config.CodexToken = strings.TrimSpace(creds.AccessToken)
+		creds := api.DetectCodexCredentials(h.logger)
+		if creds == nil || strings.TrimSpace(creds.AccessToken) == "" {
+			return false
+		}
+		token := strings.TrimSpace(creds.AccessToken)
+		isOpenCode := creds.Source == api.CredentialSourceOpenCode
+		h.config.WithWrite(func() {
+			h.config.CodexToken = token
 			h.config.CodexAutoToken = true
-			if creds.Source == api.CredentialSourceOpenCode {
+			if isOpenCode {
 				h.config.CodexAutoSource = "opencode"
 				h.config.OpenCodeEnabled = true
 			} else {
 				h.config.CodexAutoSource = "codex"
 			}
-			return true
-		}
+		})
+		return true
 	case "antigravity":
-		if conn := h.detectAntigravityConnection(); conn != nil {
+		conn := h.detectAntigravityConnection()
+		if conn == nil {
+			return false
+		}
+		h.config.WithWrite(func() {
 			h.config.AntigravityEnabled = true
 			if h.config.AntigravityBaseURL == "" {
 				h.config.AntigravityBaseURL = conn.BaseURL
@@ -1365,32 +1410,46 @@ func (h *Handler) tryAutoDetect(provider string) bool {
 			if h.config.AntigravityCSRFToken == "" {
 				h.config.AntigravityCSRFToken = conn.CSRFToken
 			}
-			return true
-		}
+		})
+		return true
 	case "gemini":
-		if token := strings.TrimSpace(api.DetectGeminiToken(h.logger)); token != "" {
+		token := strings.TrimSpace(api.DetectGeminiToken(h.logger))
+		if token == "" {
+			return false
+		}
+		h.config.WithWrite(func() {
 			h.config.GeminiEnabled = true
 			h.config.GeminiAutoToken = true
-			return true
-		}
+		})
+		return true
 	case "grok":
-		if creds := api.DetectGrokCredentials(h.logger); creds != nil && strings.TrimSpace(creds.AccessToken) != "" {
+		creds := api.DetectGrokCredentials(h.logger)
+		if creds == nil || strings.TrimSpace(creds.AccessToken) == "" {
+			return false
+		}
+		token := strings.TrimSpace(creds.AccessToken)
+		h.config.WithWrite(func() {
 			if h.config.GrokToken == "" {
-				h.config.GrokToken = strings.TrimSpace(creds.AccessToken)
+				h.config.GrokToken = token
 				h.config.GrokAutoToken = true
 			}
 			h.config.GrokEnabled = true
-			return true
-		}
+		})
+		return true
 	case "kimi":
-		if creds := api.DetectKimiCredentials(h.logger); creds != nil && (strings.TrimSpace(creds.AccessToken) != "" || strings.TrimSpace(creds.RefreshToken) != "") {
-			if h.config.KimiToken == "" && strings.TrimSpace(creds.AccessToken) != "" {
-				h.config.KimiToken = strings.TrimSpace(creds.AccessToken)
+		creds := api.DetectKimiCredentials(h.logger)
+		if creds == nil || (strings.TrimSpace(creds.AccessToken) == "" && strings.TrimSpace(creds.RefreshToken) == "") {
+			return false
+		}
+		token := strings.TrimSpace(creds.AccessToken)
+		h.config.WithWrite(func() {
+			if h.config.KimiToken == "" && token != "" {
+				h.config.KimiToken = token
 				h.config.KimiAutoToken = true
 			}
 			h.config.KimiEnabled = true
-			return true
-		}
+		})
+		return true
 	}
 	return false
 }
@@ -1588,8 +1647,26 @@ func sanitizeProviderSettings(providers map[string]interface{}) {
 
 // ApplyProviderSettingsFromDB loads provider_settings from the DB and applies
 // API keys, tokens, and region overrides to the runtime config. This allows
-// the UI to override .env values without requiring a daemon restart.
+// the UI to override .env values without requiring a daemon restart. The whole
+// apply is serialized on the config write lock so it cannot interleave with a
+// concurrent agent-factory snapshot or another save.
 func ApplyProviderSettingsFromDB(st *store.Store, cfg *config.Config, logger *slog.Logger) {
+	cfg.WriteLock()
+	defer cfg.WriteUnlock()
+	applyProviderSettingsFromDBLocked(st, cfg, logger)
+}
+
+func applyProviderSettingsFromDBLocked(st *store.Store, cfg *config.Config, logger *slog.Logger) {
+	applyProviderSettingsLocked(st, cfg, logger, nil)
+}
+
+// applyProviderSettingsLocked applies stored provider_settings to cfg. When
+// only is non-nil, only those providers are applied, and every field is written
+// only when it differs from the current value. A save that touches one provider
+// therefore never rewrites another provider's fields, which handlers and the
+// menubar read without the config lock (a write there would be a data race
+// even when the value is unchanged).
+func applyProviderSettingsLocked(st *store.Store, cfg *config.Config, logger *slog.Logger, only map[string]bool) {
 	provJSON, err := st.GetSetting("provider_settings")
 	if err != nil || provJSON == "" {
 		return
@@ -1598,128 +1675,169 @@ func ApplyProviderSettingsFromDB(st *store.Store, cfg *config.Config, logger *sl
 	if json.Unmarshal([]byte(provJSON), &provSettings) != nil {
 		return
 	}
-
-	if s := provSettings["synthetic"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.SyntheticAPIKey = key
+	if only != nil {
+		for provider := range provSettings {
+			if !only[provider] {
+				delete(provSettings, provider)
+			}
 		}
 	}
-	if s := provSettings["zai"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.ZaiAPIKey = key
+
+	// applySecret sets *dst from a stored secret field, honoring an explicit
+	// clear (a "<field>_cleared" marker) while an absent or legacy-blank field
+	// keeps the current value. The value is written only when it differs.
+	applySecret := func(dst *string, s map[string]interface{}, field string) {
+		if v, _ := s[field].(string); v != "" {
+			if *dst != v {
+				*dst = v
+			}
+		} else if providerSettingIsCleared(s, field) {
+			if *dst != "" {
+				*dst = ""
+			}
 		}
+	}
+	// setString writes only when the value differs, so an unchanged save never
+	// touches a field a lock-free reader may be reading.
+	setString := func(dst *string, v string) {
+		if *dst != v {
+			*dst = v
+		}
+	}
+	setBool := func(dst *bool, v bool) {
+		if *dst != v {
+			*dst = v
+		}
+	}
+	setFloat := func(dst *float64, v float64) {
+		if *dst != v {
+			*dst = v
+		}
+	}
+	setInt := func(dst *int, v int) {
+		if *dst != v {
+			*dst = v
+		}
+	}
+
+	if s := provSettings["synthetic"]; s != nil {
+		applySecret(&cfg.SyntheticAPIKey, s, "api_key")
+	}
+	if s := provSettings["zai"]; s != nil {
+		applySecret(&cfg.ZaiAPIKey, s, "api_key")
 		if region, _ := s["region"].(string); region != "" {
-			cfg.ZaiRegion = region
+			setString(&cfg.ZaiRegion, region)
 			if region == "cn" {
-				cfg.ZaiBaseURL = "https://open.bigmodel.cn/api"
+				setString(&cfg.ZaiBaseURL, "https://open.bigmodel.cn/api")
 			} else {
-				cfg.ZaiBaseURL = "https://api.z.ai/api"
+				setString(&cfg.ZaiBaseURL, "https://api.z.ai/api")
 			}
 		}
 	}
 	if s := provSettings["copilot"]; s != nil {
-		if token, _ := s["token"].(string); token != "" {
-			cfg.CopilotToken = token
-		}
+		applySecret(&cfg.CopilotToken, s, "token")
 	}
 	if s := provSettings["minimax"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.MiniMaxAPIKey = key
-		}
+		applySecret(&cfg.MiniMaxAPIKey, s, "api_key")
 		if region, _ := s["region"].(string); region != "" {
-			cfg.MiniMaxRegion = region
+			setString(&cfg.MiniMaxRegion, region)
 		}
 	}
 	if s := provSettings["openrouter"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.OpenRouterAPIKey = key
-		}
+		applySecret(&cfg.OpenRouterAPIKey, s, "api_key")
 	}
 	if s := provSettings["moonshot"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.MoonshotAPIKey = key
-		}
+		applySecret(&cfg.MoonshotAPIKey, s, "api_key")
 	}
 	if s := provSettings["deepseek"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.DeepSeekAPIKey = key
-		}
+		applySecret(&cfg.DeepSeekAPIKey, s, "api_key")
 	}
 	if s := provSettings["antigravity"]; s != nil {
 		if url, _ := s["base_url"].(string); url != "" {
-			cfg.AntigravityBaseURL = url
-			cfg.AntigravityEnabled = true
+			setString(&cfg.AntigravityBaseURL, url)
+			setBool(&cfg.AntigravityEnabled, true)
 		}
-		if token, _ := s["csrf_token"].(string); token != "" {
-			cfg.AntigravityCSRFToken = token
-		}
+		applySecret(&cfg.AntigravityCSRFToken, s, "csrf_token")
 		if source, _ := s["source"].(string); source != "" {
-			cfg.AntigravitySource = api.NormalizeAntigravitySource(source)
+			setString(&cfg.AntigravitySource, api.NormalizeAntigravitySource(source))
 		}
 	}
 	// OpenCode (opencode-codex) feeds the Codex provider; the UI persists a
 	// simple enabled flag, mirroring the OPENCODE_ENABLED env var.
 	if s := provSettings["mistral"]; s != nil {
 		if enabled, ok := s["enabled"].(string); ok {
-			cfg.MistralEnabled = enabled == "true"
-			cfg.MistralDisabled = !cfg.MistralEnabled
+			setBool(&cfg.MistralEnabled, enabled == "true")
+			setBool(&cfg.MistralDisabled, !cfg.MistralEnabled)
 		}
 		if enabled, ok := s["enabled"].(bool); ok {
-			cfg.MistralDisabled = !enabled
-			cfg.MistralEnabled = enabled
+			setBool(&cfg.MistralDisabled, !enabled)
+			setBool(&cfg.MistralEnabled, enabled)
 		}
 		if v, ok := s["auth_mode"].(string); ok {
-			cfg.MistralAuthMode = v
+			setString(&cfg.MistralAuthMode, v)
 		}
 		if v, ok := s["browser"].(string); ok {
-			cfg.MistralBrowser = v
+			setString(&cfg.MistralBrowser, v)
 		}
 		if v, ok := s["browser_profile"].(string); ok {
-			cfg.MistralBrowserProfile = v
+			setString(&cfg.MistralBrowserProfile, v)
 		}
 		if v, ok := s["auth_cookie"].(string); ok && v != "" {
-			cfg.MistralAuthCookie = v
+			setString(&cfg.MistralAuthCookie, v)
+		} else if providerSettingIsCleared(s, "auth_cookie") {
+			setString(&cfg.MistralAuthCookie, "")
 		}
 	}
 	if s := provSettings["opencode"]; s != nil {
 		if enabled, ok := s["enabled"].(bool); ok {
-			cfg.OpenCodeEnabled = enabled
+			setBool(&cfg.OpenCodeEnabled, enabled)
 		}
+		// A value is removed only when an explicit "<field>_cleared" marker is
+		// stored. A legacy bare "" (written by older versions, which always sent
+		// workspace_id) keeps the env/current value, so an upgrade cannot wipe a
+		// workspace ID that lives in .env.
 		if id, _ := s["workspace_id"].(string); id != "" {
-			cfg.OpenCodeGoWorkspaceID = id
+			setString(&cfg.OpenCodeGoWorkspaceID, id)
+		} else if providerSettingIsCleared(s, "workspace_id") {
+			setString(&cfg.OpenCodeGoWorkspaceID, "")
 		}
 		if cookie, _ := s["auth_cookie"].(string); cookie != "" {
-			cfg.OpenCodeGoAuthCookie = cookie
+			setString(&cfg.OpenCodeGoAuthCookie, cookie)
+		} else if providerSettingIsCleared(s, "auth_cookie") {
+			setString(&cfg.OpenCodeGoAuthCookie, "")
 		}
 		// Usage-API mode: a console service-account key (preferred over the cookie).
 		if key, _ := s["api_key"].(string); strings.TrimSpace(key) != "" {
-			cfg.OpenCodeGoAPIKey = strings.TrimSpace(key)
+			setString(&cfg.OpenCodeGoAPIKey, strings.TrimSpace(key))
+		} else if providerSettingIsCleared(s, "api_key") {
+			setString(&cfg.OpenCodeGoAPIKey, "")
 		}
 	}
 	// Ollama Cloud: API key plus optional included-usage cap and reset day.
 	if s := provSettings["ollama"]; s != nil {
-		if key, _ := s["api_key"].(string); key != "" {
-			cfg.OllamaAPIKey = key
-		}
+		applySecret(&cfg.OllamaAPIKey, s, "api_key")
 		if limit := parseSettingFloat(s["monthly_limit"]); limit > 0 {
-			cfg.OllamaMonthlyLimit = limit
+			setFloat(&cfg.OllamaMonthlyLimit, limit)
 		}
 		if day := parseSettingInt(s["reset_day"]); day >= 1 && day <= 31 {
-			cfg.OllamaResetDay = day
+			setInt(&cfg.OllamaResetDay, day)
 		}
 	}
 	// Muse coding plan: API key plus optional probe model override.
 	if s := provSettings["muse"]; s != nil {
 		if key, _ := s["api_key"].(string); key != "" {
-			cfg.MuseAPIKey = key
+			setString(&cfg.MuseAPIKey, key)
 			// Saving a key through Settings is an explicit opt-in, so it grants
 			// the consent that auto-detection deliberately does not.
 			if !cfg.MuseDisabled {
-				cfg.MuseEnabled = true
+				setBool(&cfg.MuseEnabled, true)
 			}
+		} else if providerSettingIsCleared(s, "api_key") {
+			setString(&cfg.MuseAPIKey, "")
+			setBool(&cfg.MuseEnabled, false)
 		}
 		if model, _ := s["model"].(string); strings.TrimSpace(model) != "" {
-			cfg.MuseModel = strings.TrimSpace(model)
+			setString(&cfg.MuseModel, strings.TrimSpace(model))
 		}
 		// Detection is cached for 60s, misses included. Without this a key
 		// saved from Settings stays invisible to the provider list until the
@@ -1729,13 +1847,16 @@ func ApplyProviderSettingsFromDB(st *store.Store, cfg *config.Config, logger *sl
 	// Command Code: API key plus optional base URL override.
 	if s := provSettings["commandcode"]; s != nil {
 		if key, _ := s["api_key"].(string); strings.TrimSpace(key) != "" {
-			cfg.CommandCodeAPIKey = strings.TrimSpace(key)
+			setString(&cfg.CommandCodeAPIKey, strings.TrimSpace(key))
 			if !cfg.CommandCodeDisabled {
-				cfg.CommandCodeEnabled = true
+				setBool(&cfg.CommandCodeEnabled, true)
 			}
+		} else if providerSettingIsCleared(s, "api_key") {
+			setString(&cfg.CommandCodeAPIKey, "")
+			setBool(&cfg.CommandCodeEnabled, false)
 		}
 		if base, _ := s["base_url"].(string); strings.TrimSpace(base) != "" {
-			cfg.CommandCodeBaseURL = strings.TrimSpace(base)
+			setString(&cfg.CommandCodeBaseURL, strings.TrimSpace(base))
 		}
 	}
 
@@ -1882,6 +2003,278 @@ func (h *Handler) ToggleProvider(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// reconcileProviderAgents applies provider_settings from the DB to the live
+// config and starts, stops or restarts the affected provider agents. It is
+// called after a Settings save. Stopping a disabled or no-longer-configured
+// provider always applies; a start or restart applies only to providers whose
+// factory builds a fresh agent (opencode, mistral), so a rotated key takes
+// effect immediately for them. Only providers named in changed are touched, so
+// an unrelated save never disrupts a healthy agent.
+func (h *Handler) reconcileProviderAgents(changed []string, restart map[string]bool) {
+	if h.agentManager == nil || h.store == nil || h.config == nil {
+		return
+	}
+	// Only providers whose settings actually changed are applied and reconciled.
+	// A save that touches one provider must not rewrite another provider's
+	// fields: handlers and the menubar read those fields without the config
+	// lock, so a write there is a data race even when the value is unchanged.
+	// The special "global" bucket carries display settings, not provider config.
+	changedSet := make(map[string]bool, len(changed))
+	for _, key := range changed {
+		changedSet[key] = true
+	}
+	// Apply the settings under the config write lock, then release it before
+	// touching agents: a factory build takes the read lock (Snapshot), and
+	// nested locking would deadlock. The reconcile decisions below read the
+	// config under their own read lock.
+	var only map[string]bool
+	if len(changed) > 0 {
+		only = changedSet
+	}
+	h.config.WithWrite(func() {
+		applyProviderSettingsLocked(h.store, h.config, h.logger, only)
+	})
+	if len(changed) == 0 {
+		// No provider list: reconcile every provider (used by callers that do
+		// not track which settings changed).
+		vis := h.providerVisibilityMap()
+		for _, p := range providerCatalog() {
+			h.reconcileProviderAgent(p.Key, vis, true)
+		}
+		return
+	}
+	vis := h.providerVisibilityMap()
+	for _, p := range providerCatalog() {
+		if !changedSet[p.Key] {
+			continue
+		}
+		h.reconcileProviderAgent(p.Key, vis, restart[p.Key])
+	}
+}
+
+// reconcileProviderAgent starts, stops or restarts one provider's agent to
+// match the current config and visibility. A stop (provider disabled or no
+// longer configured) always applies. A start or restart only applies to
+// providers whose factory builds a fresh agent and client (see
+// providerRuntimeRestartable); every other provider keeps its startup-built
+// shared instance, so an enable or key change takes effect on the next daemon
+// restart, exactly as before this reconcile path existed.
+func (h *Handler) reconcileProviderAgent(key string, vis map[string]map[string]bool, forceRestart bool) {
+	polling := h.providerPollingEnabled(key, vis)
+	configured := h.isProviderConfigured(key)
+	running := h.agentManager.IsRunning(key)
+	if !polling || !configured {
+		if running {
+			h.agentManager.Stop(key)
+		}
+		if polling && !configured {
+			h.logger.Warn("provider enabled but not configured; skipping polling",
+				"provider", key, "hint", "add its API key or credentials in Settings -> Providers")
+		}
+		return
+	}
+	if !providerRuntimeRestartable[key] {
+		// A shared-instance provider: starting it now would run a second copy
+		// of an agent whose client was built at startup (and never pick up the
+		// new credential anyway), so leave it untouched.
+		return
+	}
+	if running {
+		if !forceRestart {
+			return
+		}
+		// Restart so a changed key or credential is re-read. Stop waits for the
+		// old Run to exit, so Start cannot overlap two agents for this key.
+		h.agentManager.Stop(key)
+	}
+	if err := h.agentManager.Start(key); err != nil {
+		h.logger.Warn("provider start failed after settings update", "provider", key, "error", err)
+	}
+}
+
+// providerRestartFields are the provider_settings field names that only take
+// effect when the agent is (re)built: credentials, enable flags and connection
+// details. Any other field (display_mode, pace_mode, auto_start_*, thresholds)
+// applies live, so a save that touches only those leaves a running agent alone.
+var providerRestartFields = map[string]bool{
+	"api_key":         true,
+	"token":           true,
+	"auth_cookie":     true,
+	"csrf_token":      true,
+	"workspace_id":    true,
+	"base_url":        true,
+	"enabled":         true,
+	"profiles_dir":    true,
+	"region":          true,
+	"browser":         true,
+	"browser_profile": true,
+	"auth_mode":       true,
+	"model":           true,
+	"monthly_limit":   true,
+	"reset_day":       true,
+}
+
+// providerRuntimeRestartable lists providers whose agent factory builds a fresh
+// agent and client on every Start, so a runtime restart actually applies new
+// credentials. Every other provider shares one instance built at startup; for
+// them a restart would run two copies of the same agent and re-read nothing, so
+// changes keep applying on the next daemon restart (as before).
+var providerRuntimeRestartable = map[string]bool{
+	"opencode": true,
+	"mistral":  true,
+}
+
+// providerSettingsNeedRestart reports which providers in a saved
+// provider_settings payload changed a restart-requiring field to a different
+// value. The UI sends every non-password field on every save, so presence of a
+// field is not a change; only a value that differs from the stored one is. A
+// display-only save, a no-op save, or a change to a provider that is not
+// restarted at runtime returns no entries.
+func providerSettingsNeedRestart(provSettings, stored map[string]interface{}, cleared map[string]map[string]bool) map[string]bool {
+	restart := map[string]bool{}
+	for provider, raw := range provSettings {
+		if !providerRuntimeRestartable[provider] {
+			continue
+		}
+		m, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		storedMap, _ := stored[provider].(map[string]interface{})
+		for field, value := range m {
+			if !providerRestartFields[field] {
+				continue
+			}
+			if !providerSettingChanged(field, value, storedMap[field], cleared[provider][field]) {
+				continue
+			}
+			restart[provider] = true
+			break
+		}
+	}
+	return restart
+}
+
+// providerSettingChanged reports whether an incoming restart-field value is a
+// real change from the stored one. An empty incoming string is normally not a
+// change: the settings merge and ApplyProviderSettingsFromDB treat an empty
+// value as "keep the stored one" (the UI omits unchanged sensitive fields
+// entirely). An explicit clear (null or a clear_ flag) is a change even though
+// it arrives as an empty string.
+func providerSettingChanged(field string, incoming, stored interface{}, explicitlyCleared bool) bool {
+	if explicitlyCleared {
+		return true
+	}
+	if incoming == nil {
+		return false
+	}
+	if s, ok := incoming.(string); ok && strings.TrimSpace(s) == "" {
+		return false
+	}
+	return !providerSettingValuesEqual(incoming, stored)
+}
+
+// providerSettingValuesEqual compares two setting values that may have arrived
+// as different JSON types (for example a select's "true" string against a bool
+// stored by another path). Numbers and bools are compared by their text form.
+func providerSettingValuesEqual(a, b interface{}) bool {
+	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+}
+
+// applyProviderSettingClearFlags rewrites an incoming provider_settings payload
+// so an explicit clear is unambiguous: a null value for any field, or a
+// `clear_<field>: true` flag, becomes the empty string and the flag is dropped.
+// It returns the set of explicitly cleared fields per provider. A blank string
+// (what the UI sends for an empty plain text field) is NOT a clear - only null
+// or the explicit flag is - so a blank workspace_id or browser_profile never
+// wipes a stored or .env value.
+func applyProviderSettingClearFlags(provSettings map[string]interface{}) map[string]map[string]bool {
+	cleared := map[string]map[string]bool{}
+	for provider, raw := range provSettings {
+		m, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for key, value := range m {
+			if strings.HasPrefix(key, "clear_") {
+				field := strings.TrimPrefix(key, "clear_")
+				if isTruthy(value) {
+					m[field] = ""
+					if cleared[provider] == nil {
+						cleared[provider] = map[string]bool{}
+					}
+					cleared[provider][field] = true
+				}
+				delete(m, key)
+				continue
+			}
+			if value == nil {
+				// A null value means clear, not "leave as is".
+				m[key] = ""
+				if cleared[provider] == nil {
+					cleared[provider] = map[string]bool{}
+				}
+				cleared[provider][key] = true
+			}
+		}
+	}
+	return cleared
+}
+
+// isTruthy reads a JSON flag that may arrive as a bool or a string.
+func isTruthy(v interface{}) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return t == "true" || t == "1"
+	}
+	return false
+}
+
+// providerSettingClearMarker is the stored key that records an intentional
+// clear of a provider field, e.g. "workspace_id_cleared": true. A bare empty
+// string is NOT a clear: older versions always persisted a blank workspace_id,
+// so treating "" as a clear would wipe a value that comes from .env on upgrade.
+func providerSettingClearMarker(field string) string {
+	return field + "_cleared"
+}
+
+// providerSettingIsCleared reports whether a stored provider setting was
+// intentionally cleared, i.e. it carries the "<field>_cleared" marker. A
+// present-but-empty legacy value without the marker is not a clear.
+func providerSettingIsCleared(m map[string]interface{}, field string) bool {
+	return isTruthy(m[providerSettingClearMarker(field)])
+}
+
+// setProviderSettingClearMarker records or removes the explicit-clear marker
+// for a field, so a later apply knows the empty value is intentional. Setting a
+// non-empty value must remove the marker.
+func setProviderSettingClearMarker(m map[string]interface{}, field string, cleared bool) {
+	if cleared {
+		m[providerSettingClearMarker(field)] = true
+		return
+	}
+	delete(m, providerSettingClearMarker(field))
+}
+
+// cloneProviderSettings deep-copies a provider_settings map so the pre-merge
+// snapshot used for change detection is not mutated by the merge.
+func cloneProviderSettings(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		return nil
+	}
+	var out map[string]interface{}
+	if json.Unmarshal(data, &out) != nil {
+		return nil
+	}
+	return out
+}
+
 // ReloadProviders reloads provider configuration from env and reconciles runtime polling.
 func (h *Handler) ReloadProviders(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1897,12 +2290,15 @@ func (h *Handler) ReloadProviders(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to reload config")
 		return
 	}
-	applyProviderConfig(h.config, cfg)
-
-	// Apply provider_settings from DB (keys/regions set via UI override .env)
-	if h.store != nil {
-		ApplyProviderSettingsFromDB(h.store, h.config, h.logger)
-	}
+	// Replace the live config under the write lock, so a factory snapshot or a
+	// concurrent save cannot observe a half-applied config.
+	h.config.WithWrite(func() {
+		applyProviderConfig(h.config, cfg)
+		// Apply provider_settings from DB (keys/regions set via UI override .env)
+		if h.store != nil {
+			applyProviderSettingsFromDBLocked(h.store, h.config, h.logger)
+		}
+	})
 
 	if h.agentManager != nil {
 		vis := h.providerVisibilityMap()
@@ -7396,22 +7792,64 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "invalid provider_settings value")
 			return
 		}
+		// An empty payload changes nothing: do not re-apply settings or touch
+		// any agent (the full-reconcile path would otherwise restart every
+		// runtime-restartable provider).
+		if len(provSettings) == 0 {
+			provJSON, _ := h.store.GetSetting("provider_settings")
+			existing := map[string]interface{}{}
+			if provJSON != "" {
+				_ = json.Unmarshal([]byte(provJSON), &existing)
+			}
+			stripProviderSecrets(existing)
+			result["provider_settings"] = existing
+			respondJSON(w, http.StatusOK, result)
+			return
+		}
 		// Deep-merge with existing settings: preserve fields not in the update
 		// (e.g. sensitive keys omitted from the form when unchanged).
 		existing := make(map[string]interface{})
 		if existingJSON, _ := h.store.GetSetting("provider_settings"); existingJSON != "" {
 			_ = json.Unmarshal([]byte(existingJSON), &existing)
 		}
+		// Snapshot the stored settings before merging so change detection can
+		// compare each incoming value against what was there. The UI sends
+		// every non-password field on every save, so presence alone is not a
+		// change; only a different value requires a restart.
+		storedSettings := cloneProviderSettings(existing)
+		clearedFields := applyProviderSettingClearFlags(provSettings)
 		for k, v := range provSettings {
 			newMap, newOK := v.(map[string]interface{})
 			existingMap, existOK := existing[k].(map[string]interface{})
 			if newOK && existOK {
-				// Merge fields: new values override, missing keys preserved
+				// Merge fields: new values override, missing keys preserved. A
+				// blank value that was not explicitly cleared is "unchanged" -
+				// the UI always sends plain text fields, so a blank
+				// workspace_id/browser_profile must not wipe a stored or .env
+				// value. Only an explicit clear writes "" and records a
+				// "<field>_cleared" marker so apply knows the empty value is
+				// intentional (and a legacy bare "" is not).
 				for fk, fv := range newMap {
+					if s, ok := fv.(string); ok && s == "" {
+						if !clearedFields[k][fk] {
+							continue
+						}
+						setProviderSettingClearMarker(existingMap, fk, true)
+						existingMap[fk] = fv
+						continue
+					}
+					setProviderSettingClearMarker(existingMap, fk, false)
 					existingMap[fk] = fv
 				}
 				existing[k] = existingMap
 			} else {
+				// A provider not yet stored: record clear markers so a cleared
+				// field is not mistaken for a legacy blank value on apply.
+				if newOK {
+					for fk := range clearedFields[k] {
+						setProviderSettingClearMarker(newMap, fk, true)
+					}
+				}
 				existing[k] = v
 			}
 		}
@@ -7429,6 +7867,14 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		sort.Strings(updatedProviders)
 		h.logger.Info("Provider settings updated", "providers", updatedProviders)
+		// Keys and enable flags just saved must reach the runtime without a
+		// daemon restart: re-apply them to the live config and start, stop or
+		// restart the affected provider agents. Only providers whose factory
+		// builds a fresh agent (opencode, mistral) are restarted at runtime,
+		// and only when a restart-requiring field actually changed value - the
+		// UI resends every field, so a no-op or display-only save must not
+		// disrupt a healthy agent (nor re-run Mistral's browser cookie import).
+		h.reconcileProviderAgents(updatedProviders, providerSettingsNeedRestart(provSettings, storedSettings, clearedFields))
 		// Strip sensitive fields before returning to client
 		stripProviderSecrets(existing)
 		result["provider_settings"] = existing

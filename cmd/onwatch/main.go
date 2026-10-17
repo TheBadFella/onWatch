@@ -427,24 +427,41 @@ func migrateDBLocation(newPath string, logger *slog.Logger) {
 	}
 }
 
-// fixExplicitDBPath detects when a user's .env has a misconfigured DB_PATH
-// (e.g., ./onwatch.db or ./syntrack.db) while the canonical data/ path holds
-// the actual historical data. It redirects to the canonical path so the
-// dashboard shows existing data instead of appearing empty.
+// fixExplicitDBPath migrates a legacy relative DB_PATH default left in a user's
+// .env (e.g., ./onwatch.db or ./syntrack.db) to the canonical data/ path when
+// that path holds the real historical data, so the dashboard shows existing
+// data instead of appearing empty.
+//
+// It must never redirect a path the user chose deliberately. A --db flag is
+// always honoured, and any absolute ONWATCH_DB_PATH is kept as-is. Redirecting
+// an isolated instance to the production database makes two daemons poll and
+// refresh the same one-time OAuth tokens, logging the user out of Claude Code.
 func fixExplicitDBPath(cfg *config.Config, logger *slog.Logger) {
+	// A --db flag is an explicit operator choice - never redirect it.
+	for _, arg := range os.Args[1:] {
+		if arg == "--db" || strings.HasPrefix(arg, "--db=") {
+			return
+		}
+	}
+
+	// Only the legacy relative defaults are candidates for migration. An
+	// absolute path (e.g. from ONWATCH_DB_PATH) is deliberate and is kept.
+	if filepath.IsAbs(cfg.DBPath) {
+		return
+	}
+	switch filepath.Clean(cfg.DBPath) {
+	case "onwatch.db", "syntrack.db":
+		// legacy relative default - may be migrated below
+	default:
+		return
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return
 	}
 
 	canonicalPath := filepath.Join(home, ".onwatch", "data", "onwatch.db")
-
-	// Already using the canonical path - nothing to fix
-	absExplicit, _ := filepath.Abs(cfg.DBPath)
-	absCan, _ := filepath.Abs(canonicalPath)
-	if absExplicit == absCan {
-		return
-	}
 
 	// Check if canonical path exists and has data
 	canInfo, err := os.Stat(canonicalPath)
@@ -1411,10 +1428,10 @@ func run() error {
 	if cfg.HasProvider("kimi") {
 		kimiTr = tracker.NewKimiTracker(db, logger)
 	}
-	var opencodeTr *tracker.OpenCodeTracker
-	if cfg.HasProvider("opencode") {
-		opencodeTr = tracker.NewOpenCodeTracker(db, logger)
-	}
+	// Always constructed: OpenCode can be enabled at runtime from Settings, so
+	// the tracker and its agent factory must exist even when no key is set at
+	// startup.
+	opencodeTr := tracker.NewOpenCodeTracker(db, logger)
 	var ollamaTr *tracker.OllamaTracker
 	if cfg.HasProvider("ollama") {
 		ollamaTr = tracker.NewOllamaTracker(db, logger)
@@ -1509,16 +1526,6 @@ func run() error {
 		kimiSm := agent.NewSessionManager(db, "kimi", idleTimeout, logger)
 		kimiAg = agent.NewKimiAgent(kimiClient, db, kimiTr, cfg.PollInterval, logger, kimiSm)
 	}
-	var opencodeAg *agent.OpenCodeAgent
-	if cfg.HasProvider("opencode") {
-		var opencodeOpts []api.OpenCodeClientOption
-		if cfg.OpenCodeGoBaseURL != "" {
-			opencodeOpts = append(opencodeOpts, api.WithOpenCodeBaseURL(cfg.OpenCodeGoBaseURL))
-		}
-		opencodeClient := api.NewOpenCodeClient(logger, opencodeOpts...)
-		opencodeSm := agent.NewSessionManager(db, "opencode", idleTimeout, logger)
-		opencodeAg = agent.NewOpenCodeAgent(opencodeClient, db, opencodeTr, cfg, cfg.PollInterval, logger, opencodeSm)
-	}
 	var ollamaAg *agent.OllamaAgent
 	if cfg.HasProvider("ollama") {
 		ollamaClient := api.NewOllamaClient(cfg.OllamaAPIKey, logger, api.WithOllamaMonthlyLimit(cfg.OllamaMonthlyLimit), api.WithOllamaResetDay(cfg.OllamaResetDay))
@@ -1593,9 +1600,6 @@ func run() error {
 	}
 	if kimiAg != nil {
 		kimiAg.SetNotifier(notifier)
-	}
-	if opencodeAg != nil {
-		opencodeAg.SetNotifier(notifier)
 	}
 	if ollamaAg != nil {
 		ollamaAg.SetNotifier(notifier)
@@ -1765,9 +1769,6 @@ func run() error {
 	}
 	if kimiAg != nil {
 		kimiAg.SetPollingCheck(func() bool { return isPollingEnabled("kimi") })
-	}
-	if opencodeAg != nil {
-		opencodeAg.SetPollingCheck(func() bool { return isPollingEnabled("opencode") })
 	}
 	if ollamaAg != nil {
 		ollamaAg.SetPollingCheck(func() bool { return isPollingEnabled("ollama") })
@@ -1963,17 +1964,48 @@ func run() error {
 	if kimiAg != nil {
 		agentMgr.RegisterFactory("kimi", func() (agent.AgentRunner, error) { return kimiAg, nil })
 	}
-	if cfg.HasProvider("mistral") {
-		agentMgr.RegisterFactory("mistral", func() (agent.AgentRunner, error) {
-			mistralAg := agent.NewMistralAgent(db, cfg, logger)
-			mistralAg.SetNotifier(notifier)
-			mistralAg.SetPollingCheck(func() bool { return isPollingEnabled("mistral") })
-			return mistralAg, nil
-		})
-	}
-	if opencodeAg != nil {
-		agentMgr.RegisterFactory("opencode", func() (agent.AgentRunner, error) { return opencodeAg, nil })
-	}
+	// Mistral and OpenCode are the only providers whose factory builds a FRESH
+	// agent and client on every start, so they can be restarted at runtime
+	// (a saved key or enable flag takes effect without a daemon restart) and
+	// never read the mutable shared config. They are registered unconditionally
+	// so a provider first enabled from Settings can be started; every other
+	// provider shares one instance built at startup and keeps the old behaviour
+	// (changes apply on daemon restart). Mistral's config is copied by value at
+	// build time (NewMistralAgent already copies), OpenCode's credentials are
+	// snapshotted by NewOpenCodeAgent.
+	agentMgr.RegisterFactory("mistral", func() (agent.AgentRunner, error) {
+		// Snapshot the shared config under its read lock, so a concurrent
+		// settings save cannot mutate it mid-copy (the factory reads several
+		// fields, and NewMistralAgent copies the whole struct).
+		snapshot := cfg.Snapshot()
+		if !snapshot.HasProvider("mistral") {
+			return nil, fmt.Errorf("mistral: enable it and set credentials in Settings -> Providers")
+		}
+		mistralAg := agent.NewMistralAgent(db, &snapshot, logger)
+		mistralAg.SetNotifier(notifier)
+		mistralAg.SetPollingCheck(func() bool { return isPollingEnabled("mistral") })
+		return mistralAg, nil
+	})
+	agentMgr.RegisterFactory("opencode", func() (agent.AgentRunner, error) {
+		snapshot := cfg.Snapshot()
+		if !snapshot.OpenCodeGoConfigured() {
+			// The settings reconcile path logs this as a warning when the user
+			// enables the provider without a credential; keep the startup pass
+			// quiet for users who never touch OpenCode.
+			logger.Debug("OpenCode Go not configured; skipping polling")
+			return nil, fmt.Errorf("opencode: set the Usage API Key (or workspace ID + session cookie) in Settings -> Providers -> OpenCode Go")
+		}
+		var opencodeOpts []api.OpenCodeClientOption
+		if snapshot.OpenCodeGoBaseURL != "" {
+			opencodeOpts = append(opencodeOpts, api.WithOpenCodeBaseURL(snapshot.OpenCodeGoBaseURL))
+		}
+		opencodeClient := api.NewOpenCodeClient(logger, opencodeOpts...)
+		opencodeSm := agent.NewSessionManager(db, "opencode", idleTimeout, logger)
+		ag := agent.NewOpenCodeAgent(opencodeClient, db, opencodeTr, &snapshot, snapshot.PollInterval, logger, opencodeSm)
+		ag.SetNotifier(notifier)
+		ag.SetPollingCheck(func() bool { return isPollingEnabled("opencode") })
+		return ag, nil
+	})
 	if ollamaAg != nil {
 		agentMgr.RegisterFactory("ollama", func() (agent.AgentRunner, error) { return ollamaAg, nil })
 	}
