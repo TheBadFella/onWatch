@@ -151,6 +151,15 @@ type QuotaMeter struct {
 	Source          string    `json:"source,omitempty"` // "statusline" or "api"
 	AgeSeconds      int64     `json:"age_seconds,omitempty"`
 	IsStale         bool      `json:"is_stale,omitempty"`
+
+	// StatusLabel is the provider's raw window status (OpenCode key mode, e.g.
+	// "exhausted"). Non-empty means Status is authoritative and is surfaced in
+	// the quota's tooltip.
+	StatusLabel string `json:"status_label,omitempty"`
+	// PercentOnly marks a quota whose used/limit are synthetic (OpenCode key
+	// mode reports a bare percent). The UI shows the percent alone, the same
+	// as a quota with no used/limit at all.
+	PercentOnly bool `json:"percent_only,omitempty"`
 }
 
 // TrendSeries groups sparkline points for a provider-level detailed view.

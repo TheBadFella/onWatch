@@ -850,12 +850,19 @@ func normalizeQuotas(payload map[string]interface{}, warningPercent, criticalPer
 			continue
 		}
 		percent := firstFloat(item, "cardPercent", "usagePercent", "percent", "utilization", "remainingPercent")
+		statusLabel := stringValue(item, "statusLabel")
+		percentOnly := false
+		if v, ok := item["percentOnly"].(bool); ok {
+			percentOnly = v
+		}
 		meter := menubar.QuotaMeter{
 			Key:            strings.ToLower(strings.ReplaceAll(label, " ", "_")),
 			Label:          label,
 			DisplayValue:   displayValue(item, percent),
 			Percent:        percent,
 			Status:         quotaStatus(item, percent, warningPercent, criticalPercent),
+			StatusLabel:    statusLabel,
+			PercentOnly:    percentOnly,
 			Used:           firstFloat(item, "usage", "used", "currentUsage", "currentUsed"),
 			Limit:          firstFloat(item, "limit", "total", "currentLimit", "entitlement"),
 			Format:         stringValue(item, "format"),
@@ -881,6 +888,11 @@ func normalizeQuotas(payload map[string]interface{}, warningPercent, criticalPer
 }
 
 func quotaStatus(item map[string]interface{}, percent float64, warningPercent, criticalPercent int) string {
+	// An upstream window status that is not "ok" (OpenCode key mode) is
+	// authoritative: a blocked window is critical whatever its percent.
+	if label := stringValue(item, "statusLabel"); label != "" && !strings.EqualFold(label, "ok") {
+		return "critical"
+	}
 	rawStatus := stringValue(item, "status")
 	if _, ok := item["remainingPercent"]; ok || strings.EqualFold(stringValue(item, "cardLabel"), "Remaining") {
 		if rawStatus != "" {

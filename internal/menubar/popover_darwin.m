@@ -29,6 +29,8 @@ static void onwatch_run_on_main_sync(dispatch_block_t block) {
 }
 
 extern void onwatchGoGrantBrowserAccess(uint64_t token);
+// Implemented in Go (resize_darwin.go); applies the tested floor/ceiling.
+extern int onwatchGoClampPopoverHeight(int requested, int maxAllowed);
 static NSMapTable *onwatchGrantHosts;
 
 bool onwatch_grant_origin_allowed(const char *configuredURL, const char *scheme, const char *host, int port, bool mainFrame) {
@@ -308,7 +310,15 @@ const char *onwatch_grant_reply(bool allowed, bool mainFrame, bool grant, bool p
 }
 
 - (void)applyHeight:(CGFloat)height {
-  CGFloat clampedHeight = MAX(140.0, MIN(600.0, height));
+  // The screen's visible height bounds the popover so it fits on smaller
+  // displays. ClampPopoverHeight (Go, unit-tested) applies the floor/ceiling;
+  // this is the final guard against a bad measurement from the page.
+  int maxAllowed = 0;
+  NSScreen *screen = [self screenForAnchorRect:[self statusButtonScreenRect]];
+  if (screen) {
+    maxAllowed = (int)(NSHeight(screen.visibleFrame) - 24.0);
+  }
+  CGFloat clampedHeight = (CGFloat)onwatchGoClampPopoverHeight((int)height, maxAllowed);
   CGFloat delta = clampedHeight - self.height;
   if (delta < 0) {
     delta = -delta;

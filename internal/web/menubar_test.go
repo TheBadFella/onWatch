@@ -1031,6 +1031,67 @@ func TestSecurityHeadersFrameDenyExemptsQuickViewOnly(t *testing.T) {
 	}
 }
 
+// A non-ok upstream window status is authoritative in the menubar: the meter
+// is critical whatever its percent, and the raw label rides along for the
+// tooltip. Percent-only quotas carry percent_only so the UI drops the fake
+// "8/100 used" line.
+func TestNormalizeQuotas_PercentOnlyAndStatus(t *testing.T) {
+	t.Parallel()
+	payload := map[string]interface{}{
+		"quotas": []interface{}{
+			map[string]interface{}{
+				"name": "five_hour", "displayName": "5-Hour",
+				"utilization": 10.0, "used": 10.0, "limit": 100.0,
+				"format": "percent", "percentOnly": true,
+				"status": "critical", "statusLabel": "exhausted",
+			},
+			map[string]interface{}{
+				"name": "weekly", "displayName": "Weekly",
+				"utilization": 4.0, "used": 4.0, "limit": 100.0,
+				"format": "percent", "percentOnly": true,
+				"status": "healthy", "statusLabel": "ok",
+			},
+			map[string]interface{}{
+				"name": "monthly", "displayName": "Monthly",
+				"utilization": 12.8, "used": 0.38, "limit": 3.0,
+				"format": "currency",
+			},
+		},
+	}
+	quotas := normalizeQuotas(payload, 70, 90)
+	if len(quotas) != 3 {
+		t.Fatalf("quotas = %d, want 3", len(quotas))
+	}
+	byKey := map[string]menubar.QuotaMeter{}
+	for _, q := range quotas {
+		byKey[q.Label] = q
+	}
+	if q := byKey["5-Hour"]; q.Status != "critical" || q.StatusLabel != "exhausted" || !q.PercentOnly {
+		t.Errorf("5-Hour = %+v, want critical/exhausted/percentOnly", q)
+	}
+	if q := byKey["Weekly"]; q.Status != "healthy" || q.StatusLabel != "ok" || !q.PercentOnly {
+		t.Errorf("Weekly = %+v, want healthy/ok/percentOnly", q)
+	}
+	if q := byKey["Monthly"]; q.PercentOnly || q.StatusLabel != "" {
+		t.Errorf("Monthly = %+v, want real currency, no status label", q)
+	}
+}
+
+func TestQuotaStatus_UnknownStatusLabelIsCritical(t *testing.T) {
+	t.Parallel()
+	item := map[string]interface{}{"statusLabel": "some-new-value", "utilization": 1.0}
+	if got := quotaStatus(item, 1, 70, 90); got != "critical" {
+		t.Fatalf("quotaStatus = %q, want critical for an unknown status label", got)
+	}
+	// Empty label falls back to the percent bands.
+	if got := quotaStatus(map[string]interface{}{"utilization": 95.0}, 95, 70, 90); got != "critical" {
+		t.Fatalf("quotaStatus = %q, want critical from percent", got)
+	}
+	if got := quotaStatus(map[string]interface{}{"statusLabel": "ok", "utilization": 5.0}, 5, 70, 90); got != "healthy" {
+		t.Fatalf("quotaStatus = %q, want healthy for ok", got)
+	}
+}
+
 func TestUpdateMenubarProviderHistory(t *testing.T) {
 	t.Parallel()
 	settings := menubar.DefaultSettings()

@@ -46,6 +46,9 @@
             --text-primary: #ffffff;
             --text-soft: rgba(255, 255, 255, 0.78);
             --text-muted: rgba(255, 255, 255, 0.5);
+            /* Near-white secondary for dense metadata (reset/usage lines):
+               ~80% opacity clears WCAG AA 4.5:1 on the dark card. */
+            --text-secondary: rgba(255, 255, 255, 0.82);
 
             --healthy: #22c55e;
             --warning: #f59e0b;
@@ -78,6 +81,8 @@
             --text-primary: #0f172a;
             --text-soft: rgba(15, 23, 42, 0.82);
             --text-muted: rgba(15, 23, 42, 0.62);
+            /* Darker secondary for dense metadata on the light card. */
+            --text-secondary: rgba(15, 23, 42, 0.78);
             --track: rgba(15, 23, 42, 0.12);
             --focus: rgba(37, 99, 235, 0.45);
         }
@@ -549,10 +554,20 @@
             align-content: start;
         }
 
+        /* Default view packs cards into explicit rows (computed in JS): each row
+           is a flex line whose cards grow in proportion to their column span, so
+           a row never leaves empty space on the right. */
         .provider-grid-standard {
-            display: grid;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
-            gap: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .provider-row {
+            display: flex;
+            align-items: stretch;
+            gap: 5px;
+            min-width: 0;
         }
 
         .provider-grid-detailed {
@@ -568,8 +583,12 @@
         }
 
         .provider-card-standard {
-            grid-column: span var(--card-span, 6);
+            /* --card-span is min(quotaCount, 4); grow keeps row proportions. */
+            flex: var(--card-span, 4) 1 0;
             min-width: 0;
+            gap: 2px;
+            padding: 4px 6px;
+            border-radius: 12px;
         }
 
         .provider-card-detailed {
@@ -579,9 +598,58 @@
 
         .quota-grid {
             display: grid;
-            grid-template-columns: repeat(min(var(--quota-count, 1), 3), minmax(0, 1fr));
+            /* --quota-cols is ringColumns(count): never orphans a lone ring. */
+            grid-template-columns: repeat(var(--quota-cols, 1), minmax(0, 1fr));
             gap: 1px;
             min-width: 0;
+        }
+
+        /* Default-view density: smaller rings and text than the detailed view. */
+        .menubar-view-standard {
+            --chart-size: 34px;
+            --chart-stroke: 3.5px;
+        }
+
+        .menubar-view-standard .provider-header {
+            padding-bottom: 0;
+        }
+
+        .menubar-view-standard .provider-icon {
+            width: 16px;
+            height: 16px;
+            -webkit-mask-size: 14px 14px;
+            mask-size: 14px 14px;
+        }
+
+        .menubar-view-standard .provider-name {
+            font-size: 11px;
+        }
+
+        .menubar-view-standard .quota-item {
+            gap: 0;
+        }
+
+        .menubar-view-standard .quota-label {
+            max-width: 72px;
+            font-size: 9px;
+            line-height: 1.15;
+        }
+
+        .menubar-view-standard .quota-reset-line {
+            font-size: 9.5px;
+            color: var(--text-secondary);
+        }
+
+        .menubar-view-standard .quota-reset-line svg {
+            width: 9px;
+            height: 9px;
+            opacity: 1;
+        }
+
+        .menubar-view-standard .quota-usage-line {
+            font-size: 9px;
+            color: var(--text-secondary);
+            opacity: 1;
         }
 
         .supplementary-section {
@@ -716,10 +784,6 @@
             color: var(--text-muted);
             opacity: 0.7;
             white-space: nowrap;
-        }
-
-        .menubar-view-standard .quota-reset-line {
-            font-size: 9px;
         }
 
         .quota-reset-line svg {
@@ -1365,12 +1429,13 @@
                 grid-template-columns: 1fr;
             }
 
-            .provider-grid-standard {
-                grid-template-columns: 1fr;
+            /* Too narrow for 4 columns: stack every card full width. */
+            .provider-row {
+                flex-wrap: wrap;
             }
 
             .provider-card-standard {
-                grid-column: 1 / -1 !important;
+                flex: 1 1 100% !important;
             }
 
         }
@@ -1543,6 +1608,7 @@
             let refreshTimer = null;
             let resizeFrame = 0;
             let resizeTimer = 0;
+            let lastReportedHeight = null;
             let autoSaveTimer = null;
             // Without the recovery script the rest of the quick view must still work.
             const mistralRecovery = !window.MistralRecovery ? { suspended: false, markup: () => "", grantResult() {}, hide() {} } : new window.MistralRecovery({
@@ -1623,6 +1689,17 @@
             settingsBody.addEventListener("drop", handleSettingsDrop);
             settingsBody.addEventListener("dragend", handleSettingsDragEnd);
             window.addEventListener("resize", queueResizeReport);
+            // A host that missed the first report (bridge or iframe listener not
+            // yet ready) must still get a later one. Re-arm the debounce on
+            // visibility/focus so a same-height report is not suppressed forever.
+            const rearmResizeReport = () => {
+                resizeReportDelivered = false;
+                queueResizeReport();
+            };
+            document.addEventListener("visibilitychange", () => {
+                if (!document.hidden) rearmResizeReport();
+            });
+            window.addEventListener("focus", rearmResizeReport);
 
             init();
 
@@ -2226,10 +2303,56 @@
                 });
             }
 
+            const STANDARD_COLUMNS = 4;
+
+            // ringColumns keeps rings from orphaning on their own line: 4 fits
+            // one row, 5 splits 3+2 and 6 splits 3+3. Never exceeds 4. Above 6
+            // (rare) pick the widest column count that leaves no lone ring.
+            function ringColumns(count) {
+                if (count <= 1) return 1;
+                if (count === 2) return 2;
+                if (count === 3) return 3;
+                if (count === 4) return 4;
+                if (count === 5 || count === 6) return 3;
+                for (let columns = 4; columns >= 2; columns--) {
+                    if (count % columns !== 1) return columns;
+                }
+                return 4;
+            }
+
+            // packStandardRows greedily fills rows in the user's provider order
+            // without pulling later cards forward: a card joins the current row
+            // only if its span fits in the columns left, otherwise it starts a
+            // new row. Every row then stretches to the full width via flex-grow.
+            function packStandardRows(providers) {
+                const rows = [];
+                let row = [];
+                let used = 0;
+                providers.forEach((provider) => {
+                    const span = cardSpan(provider);
+                    if (row.length > 0 && used + span > STANDARD_COLUMNS) {
+                        rows.push(row);
+                        row = [];
+                        used = 0;
+                    }
+                    row.push({ provider, span });
+                    used += span;
+                });
+                if (row.length > 0) {
+                    rows.push(row);
+                }
+                return rows;
+            }
+
             function renderStandardView(providers) {
+                const rows = packStandardRows(providers);
                 return `
                     <section class="provider-grid provider-grid-standard">
-                        ${providers.map((provider) => renderStandardCard(provider)).join("")}
+                        ${rows.map((row) => `
+                            <div class="provider-row">
+                                ${row.map(({ provider, span }) => renderStandardCard(provider, span)).join("")}
+                            </div>
+                        `).join("")}
                     </section>
                 `;
             }
@@ -2265,12 +2388,13 @@
                 `;
             }
 
-            function renderStandardCard(provider) {
+            function renderStandardCard(provider, span) {
                 const quotas = providerQuotas(provider);
+                const columns = ringColumns(quotas.length);
                 return `
-                    <article class="provider-card provider-card-standard status-${escapeHTML(provider.status || "healthy")}" style="--card-span:${cardSpan(provider)};">
+                    <article class="provider-card provider-card-standard status-${escapeHTML(provider.status || "healthy")}" style="--card-span:${span || cardSpan(provider)};">
                         ${providerHeaderMarkup(provider)}
-                        <div class="quota-grid" style="--quota-count:${Math.max(quotas.length, 1)};">
+                        <div class="quota-grid" style="--quota-cols:${columns};">
                             ${quotas.map((quota) => renderStandardQuota(quota)).join("")}
                         </div>
                     </article>
@@ -2300,12 +2424,17 @@
 
             function renderStandardQuota(quota) {
                 const usage = usageSummary(quota);
+                // Labels truncate at this density, so keep the full label and
+                // value available in hover tooltips.
+                const statusNote = quotaStatusNote(quota);
+                const fullLabel = (quota.label || compactQuotaLabel(quota.label, quota.key)) + statusNote;
+                const fullValue = usage ? `${usage} used` : `${Math.round(clampPercent(quota.percent))}%`;
                 return `
                     <div class="quota-item status-${escapeHTML(quota.status || "healthy")}">
                         ${pieChartMarkup(quota)}
-                        <span class="quota-label">${escapeHTML(compactQuotaLabel(quota.label, quota.key))}</span>
-                        <span class="quota-reset-line">${icons.clock}<span>${escapeHTML(compactResetLabel(quota))}</span></span>
-                        ${usage ? `<span class="quota-usage-line">${escapeHTML(usage)} used</span>` : ''}
+                        <span class="quota-label" title="${escapeHTML(fullLabel)}">${escapeHTML(compactQuotaLabel(quota.label, quota.key))}</span>
+                        <span class="quota-reset-line" title="Resets ${escapeHTML(quota.time_until_reset || quota.reset_at || 'unknown')}">${icons.clock}<span>${escapeHTML(compactResetLabel(quota))}</span></span>
+                        ${usage ? `<span class="quota-usage-line" title="${escapeHTML(fullValue)}">${escapeHTML(usage)} used</span>` : ''}
                         ${sourceTagMarkup(quota)}
                     </div>
                 `;
@@ -2318,7 +2447,7 @@
                 return `
                     <section class="quota-detail-section status-${escapeHTML(quota.status || "healthy")}">
                         <div class="quota-detail-head">
-                            <span class="quota-detail-label">${escapeHTML(quota.label || compactQuotaLabel(quota.label, quota.key))} ${sourceTagMarkup(quota)}</span>
+                            <span class="quota-detail-label">${escapeHTML((quota.label || compactQuotaLabel(quota.label, quota.key)) + quotaStatusNote(quota))} ${sourceTagMarkup(quota)}</span>
                             <span class="quota-reset-line">${icons.clock}<span>${escapeHTML(compactResetLabel(quota))}</span></span>
                         </div>
 
@@ -2358,8 +2487,10 @@
                 const percent = clampPercent(quota.percent);
                 const circumference = 97.389;
                 const dash = (percent / 100) * circumference;
+                const fullLabel = (quota.label || compactQuotaLabel(quota.label, quota.key)) + quotaStatusNote(quota);
                 return `
                     <svg class="quota-meter" viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
+                        <title>${escapeHTML(fullLabel)}: ${Math.round(percent)}%</title>
                         <circle class="quota-track" cx="20" cy="20" r="15.5"></circle>
                         <circle class="quota-fill" cx="20" cy="20" r="15.5" stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}"></circle>
                         <circle class="quota-center" cx="20" cy="20" r="10.5"></circle>
@@ -2400,15 +2531,11 @@
                 return Array.isArray(provider && provider.quotas) ? provider.quotas : [];
             }
 
+            // cardSpan is how many of the 4 columns a card occupies:
+            // min(quotaCount, 4). Empty cards still take one column.
             function cardSpan(provider) {
                 const count = providerQuotas(provider).length;
-                if (count >= 3) {
-                    return 6;
-                }
-                if (count === 2) {
-                    return 4;
-                }
-                return 2;
+                return Math.max(1, Math.min(count, STANDARD_COLUMNS));
             }
 
             function buildAggregate(providers) {
@@ -2651,13 +2778,19 @@
                 const clientHeight = Math.ceil(element.clientHeight || 0);
                 const scrollHeight = Math.ceil(element.scrollHeight || 0);
                 const offsetHeight = Math.ceil(element.offsetHeight || 0);
+                // Children are positioned against their nearest offsetParent (the
+                // shell), so child.offsetTop includes the header and would be
+                // counted twice once the header height is added back. Measure the
+                // bottom edge relative to this element's own top instead.
+                const elementTop = element.getBoundingClientRect().top;
+                const padBottom = parseFloat(window.getComputedStyle(element).paddingBottom || "0") || 0;
                 let contentHeight = 0;
                 for (const child of element.children) {
                     if (child instanceof HTMLElement) {
-                        contentHeight = Math.max(contentHeight, Math.ceil(child.offsetTop + child.offsetHeight));
+                        contentHeight = Math.max(contentHeight, Math.ceil(child.getBoundingClientRect().bottom - elementTop));
                     }
                 }
-                contentHeight += measuredPaddingY(element);
+                contentHeight += padBottom;
                 if (scrollHeight > clientHeight + 1) {
                     return Math.max(scrollHeight, contentHeight);
                 }
@@ -2665,16 +2798,10 @@
             }
 
             function preferredResizeFloor() {
-                if (state.settingsOpen) {
-                    return 320;
-                }
-                if (state.view === "detailed") {
-                    return 500;
-                }
-                if (state.view === "minimal") {
-                    return 140;
-                }
-                return 320;
+                // A single sensible minimum for every layout: header, one card
+                // and the footer. Anything larger would leave empty space below
+                // the last card when a provider list is short.
+                return 140;
             }
 
             function measuredContentHeight() {
@@ -2690,9 +2817,40 @@
                     + (measuredGapY(shell) * 2);
             }
 
+            function preferredResizeCeiling() {
+                // Mirror the native clamp: never grow past the built-in ceiling or
+                // the screen's visible height minus a small margin.
+                let ceiling = 720;
+                const screenHeight = Number(window.screen && (window.screen.availHeight || window.screen.height));
+                if (Number.isFinite(screenHeight) && screenHeight > 0) {
+                    ceiling = Math.min(ceiling, Math.floor(screenHeight) - 24);
+                }
+                return Math.max(preferredResizeFloor(), ceiling);
+            }
+
+            // True once a report has actually reached a host channel. Until then
+            // the 2px debounce is disabled, because a report that fires before
+            // the native bridge / iframe parent listener is ready would be lost
+            // and a same-height retry would be suppressed forever.
+            let resizeReportDelivered = false;
+
+            function resizeHostPresent() {
+                return !!(
+                    (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onwatchResize)
+                    || (window.parent && window.parent !== window)
+                );
+            }
+
             function reportPreferredHeight() {
                 const measured = Math.ceil(measuredContentHeight());
-                const height = Math.max(preferredResizeFloor(), Math.min(720, measured));
+                const height = Math.max(preferredResizeFloor(), Math.min(preferredResizeCeiling(), measured));
+                // Debounce: a sub-2px change is layout noise, not a real resize.
+                // Skipped until the first report has been delivered, so a report
+                // lost to a not-yet-ready host is retried on the next signal.
+                if (resizeReportDelivered && lastReportedHeight !== null && Math.abs(height - lastReportedHeight) < 2) {
+                    return;
+                }
+                lastReportedHeight = height;
                 const payload = { type: "resize", height };
                 window.postMessage(payload, "*");
                 if (window.parent && window.parent !== window) {
@@ -2700,6 +2858,11 @@
                 }
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onwatchResize) {
                     window.webkit.messageHandlers.onwatchResize.postMessage({ height });
+                }
+                // Consider the report delivered only when a host channel exists.
+                // A bare window.postMessage with no listener is not delivery.
+                if (resizeHostPresent()) {
+                    resizeReportDelivered = true;
                 }
             }
 
@@ -2859,7 +3022,23 @@
                 return value > 0 && value < 0.01 ? value.toFixed(3) : value.toFixed(2);
             }
 
+            // quotaStatusNote renders the provider's raw window status as a
+            // tooltip suffix. Empty for a healthy ("ok") or absent status so
+            // normal quotas stay uncluttered; an unknown value is shown as-is.
+            function quotaStatusNote(quota) {
+                const label = quota.status_label;
+                if (!label || String(label).toLowerCase() === "ok") return "";
+                return ` - ${label}`;
+            }
+
             function usageSummary(quota) {
+                // Percent-only quotas (OpenCode key mode) report a bare percent
+                // with a synthetic limit of 100. Showing "8/100 used" would be a
+                // fake fraction, so no usage line is drawn: the ring already
+                // carries the percent, exactly as for a quota with no used/limit.
+                if (quota.percent_only) {
+                    return "";
+                }
                 const limit = Number(quota.limit);
                 const used = Number(quota.used);
                 if (Number.isFinite(limit) && limit > 0 && Number.isFinite(used) && used >= 0) {
