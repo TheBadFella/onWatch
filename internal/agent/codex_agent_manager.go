@@ -339,6 +339,77 @@ func shouldUseSystemCredsForProfile(profileCreds, systemCreds *api.CodexCredenti
 	return systemCreds.AccessToken != "" && subtle.ConstantTimeCompare([]byte(systemCreds.AccessToken), []byte(profileCreds.AccessToken)) == 0
 }
 
+// codexBorrowedSource records a system auth file (Codex or OpenCode) whose
+// refresh token a named-profile agent is currently using, so a successful
+// rotation can be written back to that file as well as the profile file.
+//
+// A named profile whose own token is expiring borrows the global auth.json
+// credentials (see credsRefresh). OpenAI rotates refresh tokens on use, so if
+// onWatch consumes the borrowed token without writing the replacement back,
+// the Codex CLI is left holding a spent token and gets logged out. The profile
+// file alone is not enough: the CLI reads auth.json.
+type codexBorrowedSource struct {
+	mu           sync.Mutex
+	source       api.CredentialSource
+	refreshToken string // the refresh token read from the system file
+}
+
+func (b *codexBorrowedSource) record(source api.CredentialSource, refreshToken string) {
+	// Only file-backed sources can be written back. An env-var token has no
+	// file to update, so recording it would only produce a spurious warning.
+	if source != api.CredentialSourceCodex && source != api.CredentialSourceOpenCode {
+		b.clear()
+		return
+	}
+	b.mu.Lock()
+	b.source = source
+	b.refreshToken = refreshToken
+	b.mu.Unlock()
+}
+
+func (b *codexBorrowedSource) snapshot() (api.CredentialSource, string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.source, b.refreshToken
+}
+
+func (b *codexBorrowedSource) clear() {
+	b.mu.Lock()
+	b.source = api.CredentialSourceNone
+	b.refreshToken = ""
+	b.mu.Unlock()
+}
+
+// writeRotatedTokensToBorrowedSource writes a rotated token back to the system
+// auth file it was borrowed from, but only when that file still holds the
+// refresh token onWatch consumed. If the CLI re-authenticated in the meantime,
+// the file has a newer token and must not be overwritten; a warning is logged
+// instead. It reports whether the write happened.
+func writeRotatedTokensToBorrowedSource(logger *slog.Logger, profile string, source api.CredentialSource, consumedRefreshToken, accessToken, refreshToken, idToken string, expiresIn int) bool {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	current, ok := api.ReadRefreshTokenBySource(source)
+	if !ok {
+		logger.Warn("borrowed Codex auth file is unreadable; not writing rotated tokens back",
+			"profile", profile, "source", int(source))
+		return false
+	}
+	if current != consumedRefreshToken {
+		logger.Warn("Codex auth file changed since its token was borrowed; not overwriting newer credentials",
+			"profile", profile, "source", int(source))
+		return false
+	}
+	if err := api.WriteCredentialsBySource(source, accessToken, refreshToken, idToken, expiresIn); err != nil {
+		logger.Warn("failed to write rotated Codex tokens back to the borrowed auth file",
+			"profile", profile, "source", int(source), "error", err)
+		return false
+	}
+	logger.Info("wrote rotated Codex tokens back to the borrowed auth file",
+		"profile", profile, "source", int(source))
+	return true
+}
+
 // saveTokensToProfile writes refreshed OAuth tokens to a named profile's JSON file.
 // This keeps credentials scoped to the profile and avoids contaminating the global auth.json.
 func saveTokensToProfile(profilePath, accessToken, refreshToken, idToken string, logger *slog.Logger) error {
@@ -485,6 +556,10 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 	// auth contamination between profiles (see issue #55).
 	profilePath := filepath.Join(m.profilesDir, profile.Name+".json")
 	isDefaultProfile := profile.Name == "default"
+	// borrowed tracks a system auth file (auth.json / OpenCode auth) whose
+	// refresh token this named-profile agent is currently using, so a rotation
+	// can be written back there too (see codexBorrowedSource).
+	borrowed := &codexBorrowedSource{}
 	defaultCredentials := func() *api.CodexCredentials {
 		current := api.DetectCodexCredentials(m.logger)
 		if current == nil {
@@ -526,6 +601,10 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 			} else {
 				m.rememberProfileWrite(profile.Name, profilePath)
 			}
+			// updateProfileFromSystemCreds copied the system refresh token into
+			// the profile, so a later refresh consumes that token; remember the
+			// source to write the rotation back to it.
+			borrowed.record(systemCreds.Source, systemCreds.RefreshToken)
 			if systemCreds.AccessToken != "" {
 				return systemCreds.AccessToken
 			}
@@ -565,6 +644,9 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 		// only if account_id matches. Safe because refresh writes to profile file.
 		profileCreds := readCodexProfileCredentials(profilePath)
 		if profileCreds != nil && !profileCreds.IsExpiringSoon(codexTokenRefreshThreshold) {
+			// The agent is using its own profile token; nothing to write back
+			// to a system auth file.
+			borrowed.clear()
 			return profileCreds
 		}
 
@@ -575,9 +657,13 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 			} else {
 				m.rememberProfileWrite(profile.Name, profilePath)
 			}
+			// The agent will refresh (and consume) this system refresh token,
+			// so remember where it came from to write the rotation back.
+			borrowed.record(systemCreds.Source, systemCreds.RefreshToken)
 			return systemCreds
 		}
 
+		borrowed.clear()
 		return profileCreds
 	})
 
@@ -597,9 +683,20 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 			return api.WriteCredentialsBySource(cur.Source, accessToken, refreshToken, idToken, expiresIn)
 		}
 
-		// Named profiles: save refreshed tokens to the profile file only
+		// Named profiles: save refreshed tokens to the profile file.
 		if err := saveTokensToProfile(profilePath, accessToken, refreshToken, idToken, m.logger); err != nil {
 			return err
+		}
+
+		// If the refresh consumed a token borrowed from a system auth file,
+		// write the rotation back there too. The Codex CLI reads auth.json, so
+		// leaving a spent one-time-use token there logs it out. The write is a
+		// compare-and-swap: it only lands if the file still holds the token we
+		// consumed.
+		if source, consumed := borrowed.snapshot(); source != api.CredentialSourceNone && consumed != "" {
+			if writeRotatedTokensToBorrowedSource(m.logger, profile.Name, source, consumed, accessToken, refreshToken, idToken, expiresIn) {
+				borrowed.clear()
+			}
 		}
 
 		// Update scanner's last-known mod time so it doesn't restart this agent
