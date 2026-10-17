@@ -190,8 +190,10 @@ func TestBuildMenubarSnapshot_CodexPausedStatus(t *testing.T) {
 		t.Fatalf("BuildMenubarSnapshot: %v", err)
 	}
 	card := findMenubarProviderCard(t, snapshot, "codex:1")
-	if card.Status != "warning" {
-		t.Errorf("paused codex card status = %q, want warning", card.Status)
+	// Pause is a warning floor, not a ceiling: at 96% the quota severity wins
+	// and the card stays critical, while connection_status signals re-auth.
+	if card.Status != "critical" {
+		t.Errorf("paused codex card status = %q, want critical", card.Status)
 	}
 	if card.ConnectionStatus != "paused" {
 		t.Errorf("paused codex card connection_status = %q, want paused", card.ConnectionStatus)

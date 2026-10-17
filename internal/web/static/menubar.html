@@ -2464,13 +2464,27 @@
                 return "Healthy";
             }
 
+            // The status dot carries the status; the tooltip explains a paused or
+            // stale card without inline text (minimal-UI rule, issue #147).
+            function providerDotTitle(provider) {
+                const peak = Math.round(clampPercent(provider && provider.highest_percent));
+                const updated = compactUpdatedLabel(provider && provider.updated_at);
+                const connection = String(provider && provider.connection_status || "");
+                if (connection === "paused") {
+                    return `Re-authentication required - last updated ${updated}`;
+                }
+                if (connection === "stale") {
+                    return `Updates unavailable - last updated ${updated}`;
+                }
+                return `${standardStatusLabel(provider)} - peak ${peak}%`;
+            }
+
             // standardHeaderMarkup keeps the icon next to a normally colored
             // name, then a compact right cluster with the freshness label and a
             // status dot whose tooltip carries the status.
             function standardHeaderMarkup(provider) {
                 const status = String(provider && provider.status || "healthy");
-                const peak = Math.round(clampPercent(provider && provider.highest_percent));
-                const dotTitle = `${standardStatusLabel(provider)} - peak ${peak}%`;
+                const dotTitle = providerDotTitle(provider);
                 return `
                     <div class="provider-header">
                         <div class="provider-copy">

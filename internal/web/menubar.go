@@ -771,12 +771,21 @@ func normalizeProviderCard(id, label, subtitle string, payload map[string]interf
 	if connectionStatus == "reconnect" || connectionStatus == "stale" || connectionStatus == "paused" {
 		status = "warning"
 	}
-	// A paused account needs re-authentication. Its last snapshot is stale, so
-	// the quota severities under it are not live signal - paused wins (#147).
+	// A paused account needs re-authentication. That is a warning floor, not a
+	// ceiling: the quota loop below still worsens the status, so a paused
+	// account at 100% keeps showing critical while the tooltip signals re-auth
+	// (#147 review, item 6).
 	paused, _ := payload["paused"].(bool)
 	if paused {
-		status = "warning"
+		status = worsenStatus(status, "warning")
 		connectionStatus = "paused"
+	} else if stale, _ := payload["isStale"].(bool); stale {
+		// A polling-disabled account keeps serving its last snapshot: flag it as
+		// stale so the dot tooltip shows "Updates unavailable" (#147 review).
+		status = worsenStatus(status, "warning")
+		if connectionStatus == "" {
+			connectionStatus = "stale"
+		}
 	}
 	if connection != nil && connection.Reason != "" {
 		status = "warning"
@@ -801,10 +810,6 @@ func normalizeProviderCard(id, label, subtitle string, payload map[string]interf
 			Status: quota.Status,
 			Points: points,
 		})
-	}
-	if paused {
-		// Re-assert after the quota loop so stale severity does not override it.
-		status = "warning"
 	}
 	return &menubar.ProviderCard{
 		ID:               id,

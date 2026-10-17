@@ -3759,28 +3759,20 @@ select.settings-input {
   line-height: 1.45;
 }
 
-/* Paused Codex account: needs re-authentication, data below is stale (#147). */
-.codex-paused-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  color: var(--status-warning-text);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.codex-paused-note::before {
-  content: "";
+/* Paused Codex account: needs re-authentication. Minimal UI - a status dot
+   whose tooltip carries the reason, no inline text (#147). */
+.codex-paused-dot {
+  display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--status-warning);
   flex: 0 0 auto;
+  vertical-align: middle;
+  margin: 0 6px 2px 0;
 }
 
-#quota-grid-codex > .codex-paused-note {
+#quota-grid-codex > .codex-paused-dot {
   grid-column: 1 / -1;
 }
 

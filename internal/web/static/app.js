@@ -2847,7 +2847,7 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
     const statusId = `status-codex-${q.name}`;
     const resetId = `reset-codex-${q.name}`;
 
-    return `<article class="quota-card codex-card" data-quota="${q.name}" data-provider="codex" role="button" tabindex="0" aria-label="View ${displayName} details" style="animation-delay: ${i * 60}ms">
+    return `<article class="quota-card codex-card${q.isStale ? ' stale-card' : ''}" data-quota="${q.name}" data-provider="codex" role="button" tabindex="0" aria-label="View ${displayName} details" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
         <h2 class="quota-title">
           <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
@@ -2865,6 +2865,7 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
           <div class="progress-fill" id="${progressId}" style="width: ${utilPct}%" data-status="${status}"></div>
         </div>
       </div>
+      ${q.ageSeconds != null ? `<div class="card-freshness${q.isStale ? ' stale' : ''}">${freshnessLabel(q)}</div>` : ''}
       <footer class="card-footer">
         <span class="status-badge" id="${statusId}" data-status="${status}">
           <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${statusCfg.icon}"/></svg>
@@ -2901,14 +2902,12 @@ function codexUsageSourceNoteHTML(note) {
 }
 
 // A paused Codex account needs re-authentication: its last snapshot is stale,
-// so flag it instead of rendering the old numbers as live data (issue #147).
+// so flag it instead of rendering the old numbers as live data. Minimal UI: a
+// status dot whose tooltip carries the reason, no inline text (issue #147).
 function codexPauseNoticeHTML(payload) {
   if (!payload || !payload.paused) return '';
   const reason = payload.pausedReason || 'Polling is paused. Re-authenticate via the Codex CLI to resume.';
-  return `<p class="codex-paused-note" role="note" title="${escapeHTML(reason)}">
-    <span class="status-dot" data-status="warning"></span>
-    Needs re-auth - polling paused
-  </p>`;
+  return `<span class="codex-paused-dot" role="img" aria-label="${escapeHTML(reason)}" title="${escapeHTML(reason)}"></span>`;
 }
 
 // Render Codex cards for a specific account (used in "both" view with multiple accounts)
@@ -2946,7 +2945,7 @@ function renderCodexQuotaCardsForAccount(quotas, container, accountName, planTyp
     const statusCfg = statusConfig[status] || statusConfig.healthy;
     const cardKey = `codex-${safeAccountId}-${q.name}`;
 
-    return `<article class="quota-card codex-card" id="card-${cardKey}" data-quota="${q.name}" data-provider="codex" data-account-id="${accountId}" aria-label="${escapeHTML(`${accountName} ${displayName}`)}" style="animation-delay: ${i * 60}ms">
+    return `<article class="quota-card codex-card${q.isStale ? ' stale-card' : ''}" id="card-${cardKey}" data-quota="${q.name}" data-provider="codex" data-account-id="${accountId}" aria-label="${escapeHTML(`${accountName} ${displayName}`)}" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
         <h2 class="quota-title">
           <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
@@ -2964,6 +2963,7 @@ function renderCodexQuotaCardsForAccount(quotas, container, accountName, planTyp
           <div class="progress-fill" id="progress-${cardKey}" style="width: ${utilPct}%" data-status="${status}"></div>
         </div>
       </div>
+      ${q.ageSeconds != null ? `<div class="card-freshness${q.isStale ? ' stale' : ''}">${freshnessLabel(q)}</div>` : ''}
       <footer class="card-footer">
         <span class="status-badge" id="status-${cardKey}" data-status="${status}">
           <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${statusCfg.icon}"/></svg>
@@ -3016,7 +3016,9 @@ function updateCodexCard(quota) {
     timeUntilResetSeconds: quota.timeUntilResetSeconds || 0,
     cardLabel,
     name: quota.name,
-    displayName: quota.displayName
+    displayName: quota.displayName,
+    ageSeconds: quota.ageSeconds || 0,
+    isStale: quota.isStale || false
   };
 
   const progressEl = document.getElementById(`progress-codex-${quota.name}`);
@@ -4990,8 +4992,9 @@ async function fetchCodexUsage(options = {}) {
     const renderedCount = container.querySelectorAll('.quota-card.codex-card').length;
     const sourceNote = payload.usageSourceNote || '';
     const sourceNoteChanged = (container.querySelector('.codex-usage-source-note')?.textContent || '') !== sourceNote;
-    const pausedChanged = (container.querySelector('.codex-paused-note') != null) !== Boolean(payload.paused);
-    if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged) {
+    const pausedChanged = (container.querySelector('.codex-paused-dot') != null) !== Boolean(payload.paused);
+    const staleChanged = (container.querySelector('.quota-card.stale-card') != null) !== Boolean(payload.isStale);
+    if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged || staleChanged) {
       renderCodexQuotaCards(visibleQuotas, 'quota-grid-codex', State.codexPlanType, payload.usageSourceNote, payload);
     }
 

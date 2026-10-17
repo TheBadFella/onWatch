@@ -9383,9 +9383,19 @@ func (h *Handler) buildCodexCurrent(accountID int64) map[string]interface{} {
 	}
 
 	response["capturedAt"] = latest.CapturedAt.Format(time.RFC3339)
-	// A snapshot whose reset window already passed is stale, not resetting: mark
+	// Snapshot age drives the dashboard's stale-card treatment: a polling-disabled
+	// or long-paused account keeps serving its last snapshot, which must not look
+	// live. ageSeconds lets the card show "Last updated <age> ago".
+	age := now.Sub(latest.CapturedAt)
+	if age < 0 {
+		age = 0
+	}
+	response["ageSeconds"] = int64(age.Seconds())
+	response["lastUpdatedAt"] = latest.CapturedAt.Format(time.RFC3339)
+	// A snapshot old enough that it cannot be live is stale, not resetting: mark
 	// it so the countdown does not read as a negative "Resetting..." forever.
-	if snapshotStale(now, latest.CapturedAt) {
+	stale := snapshotStale(now, latest.CapturedAt)
+	if stale {
 		response["isStale"] = true
 	}
 	if latest.PlanType != "" {
@@ -9427,6 +9437,11 @@ func (h *Handler) buildCodexCurrent(accountID int64) map[string]interface{} {
 			"utilization": q.Utilization,
 			"headroom":    headroom,
 			"status":      status,
+			// Per-quota freshness so the card's stale treatment applies to a
+			// polling-disabled or long-paused account (issue #147 review).
+			"ageSeconds":    int64(age.Seconds()),
+			"lastUpdatedAt": latest.CapturedAt.Format(time.RFC3339),
+			"isStale":       stale,
 		}
 		// code_review always shows remaining; five_hour/seven_day show remaining when display_mode="available"
 		if normalizedName == "code_review" || (showAvailable && (normalizedName == "five_hour" || normalizedName == "seven_day")) {
@@ -11610,7 +11625,14 @@ func buildCodexSummaryResponse(summary *tracker.CodexSummary) map[string]interfa
 	}
 	if summary.ResetsAt != nil {
 		result["resetsAt"] = summary.ResetsAt.Format(time.RFC3339)
-		result["timeUntilReset"] = formatDuration(summary.TimeUntilReset)
+		// A reset already in the past reads as "reset due" rather than the
+		// perpetual "Resetting..." that formatDuration would produce (#147).
+		if summary.TimeUntilReset < 0 {
+			result["timeUntilReset"] = "reset due"
+			result["resetElapsed"] = true
+		} else {
+			result["timeUntilReset"] = formatDuration(summary.TimeUntilReset)
+		}
 	}
 	if !summary.TrackingSince.IsZero() {
 		result["trackingSince"] = summary.TrackingSince.Format(time.RFC3339)
