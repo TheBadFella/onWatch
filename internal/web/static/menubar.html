@@ -20,7 +20,6 @@
             --font-lg: 12px;
             --font-xl: 13px;
 
-            --chart-size: 40px;
             --chart-stroke: 4px;
 
             --bg-body: #0d0d0d;
@@ -37,8 +36,6 @@
             --scrollbar-thumb-soft-hover: rgba(255, 255, 255, 0.25);
             --scrollbar-thumb: rgba(255, 255, 255, 0.22);
             --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
-            --quota-center: rgba(0, 0, 0, 0.52);
-            --quota-percent-stroke: rgba(0, 0, 0, 0.82);
             --footer-divider: rgba(255, 255, 255, 0.18);
             --footer-refresh-hover-bg: rgba(255, 255, 255, 0.08);
             --footer-refresh-hover-border: rgba(255, 255, 255, 0.12);
@@ -73,8 +70,6 @@
             --scrollbar-thumb-soft-hover: rgba(15, 23, 42, 0.34);
             --scrollbar-thumb: rgba(15, 23, 42, 0.3);
             --scrollbar-thumb-hover: rgba(15, 23, 42, 0.42);
-            --quota-center: rgba(248, 250, 252, 0.92);
-            --quota-percent-stroke: rgba(255, 255, 255, 0.95);
             --footer-divider: rgba(15, 23, 42, 0.26);
             --footer-refresh-hover-bg: rgba(15, 23, 42, 0.1);
             --footer-refresh-hover-border: rgba(15, 23, 42, 0.2);
@@ -486,6 +481,32 @@
             white-space: nowrap;
         }
 
+        /* Default-view header meta: freshness label plus a status dot. The dot
+           carries the status; there is no inline status text. */
+        .provider-meta {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        .provider-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: var(--healthy);
+            flex-shrink: 0;
+        }
+
+        .provider-status-dot.status-warning {
+            background: var(--warning);
+        }
+
+        .provider-status-dot.status-critical,
+        .provider-status-dot.status-danger {
+            background: var(--critical);
+        }
+
         .mistral-recovery {
             gap: var(--space-sm);
             margin: var(--space-sm) 0;
@@ -600,14 +621,16 @@
             display: grid;
             /* --quota-cols is ringColumns(count): never orphans a lone ring. */
             grid-template-columns: repeat(var(--quota-cols, 1), minmax(0, 1fr));
-            gap: 1px;
+            gap: 2px;
             min-width: 0;
         }
 
-        /* Default-view density: smaller rings and text than the detailed view. */
+        /* Default-view density: big ring tiles, tighter chrome than the detailed
+           view. --ring-size is set per card in JS so a four-quota card keeps its
+           rings from crowding the label at 360px. */
         .menubar-view-standard {
-            --chart-size: 34px;
-            --chart-stroke: 3.5px;
+            --chart-stroke: 4px;
+            --ring-size: 58px;
         }
 
         .menubar-view-standard .provider-header {
@@ -615,8 +638,8 @@
         }
 
         .menubar-view-standard .provider-icon {
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             -webkit-mask-size: 14px 14px;
             mask-size: 14px 14px;
         }
@@ -625,31 +648,8 @@
             font-size: 11px;
         }
 
-        .menubar-view-standard .quota-item {
-            gap: 0;
-        }
-
-        .menubar-view-standard .quota-label {
-            max-width: 72px;
-            font-size: 9px;
-            line-height: 1.15;
-        }
-
-        .menubar-view-standard .quota-reset-line {
-            font-size: 9.5px;
-            color: var(--text-secondary);
-        }
-
-        .menubar-view-standard .quota-reset-line svg {
-            width: 9px;
-            height: 9px;
-            opacity: 1;
-        }
-
-        .menubar-view-standard .quota-usage-line {
-            font-size: 9px;
-            color: var(--text-secondary);
-            opacity: 1;
+        .menubar-view-standard .provider-copy {
+            gap: 5px;
         }
 
         .supplementary-section {
@@ -704,27 +704,42 @@
             letter-spacing: 0;
         }
 
-        .quota-item {
+        /* Default-view ring tile: the ring carries the percent and the reset
+           countdown, and the full label wraps underneath. No inner box - tiles
+           sit directly on the provider card. */
+        .quota-tile {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 1px;
+            gap: 2px;
             min-width: 0;
             color: var(--healthy);
         }
 
-        .quota-item.status-warning {
+        .quota-tile.status-warning {
             color: var(--warning);
         }
 
-        .quota-item.status-critical,
-        .quota-item.status-danger {
+        .quota-tile.status-critical,
+        .quota-tile.status-danger {
             color: var(--critical);
         }
 
+        .quota-ring {
+            position: relative;
+            display: grid;
+            place-items: center;
+            width: var(--ring-size, 58px);
+            height: var(--ring-size, 58px);
+            max-width: 100%;
+            flex-shrink: 0;
+        }
+
         .quota-meter {
-            width: var(--chart-size);
-            height: var(--chart-size);
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
             overflow: visible;
         }
 
@@ -743,32 +758,62 @@
             transform-origin: 20px 20px;
         }
 
-        .quota-center {
-            fill: var(--quota-center);
+        .quota-ring-center {
+            position: relative;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            line-height: 1;
+            color: currentColor;
         }
 
-        .quota-percent {
-            fill: var(--text-primary);
-            font-size: 11px;
+        .quota-ring-pct {
+            font-size: calc(var(--ring-size, 58px) * 0.28);
             font-weight: 700;
-            paint-order: stroke;
-            stroke: var(--quota-percent-stroke);
-            stroke-width: 2.2px;
-            stroke-linejoin: round;
+            line-height: 1;
+            letter-spacing: -0.04em;
+            font-variant-numeric: tabular-nums;
         }
 
-        .quota-label {
-            max-width: 80px;
-            color: var(--text-primary);
-            font-size: var(--font-sm);
+        .quota-ring-unit {
+            font-size: calc(var(--ring-size, 58px) * 0.155);
+            font-weight: 700;
+            opacity: 0.72;
+            margin-left: 0.5px;
+        }
+
+        .quota-ring-reset {
+            margin-top: calc(var(--ring-size, 58px) * 0.03);
+            font-size: calc(var(--ring-size, 58px) * 0.155);
             font-weight: 500;
-            line-height: 1.05;
+            line-height: 1;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .quota-tile-label {
+            max-width: 100%;
+            color: var(--text-soft);
+            font-size: 9.5px;
+            font-weight: 550;
+            line-height: 1.1;
+            text-align: center;
+            overflow-wrap: anywhere;
+            hyphens: auto;
+        }
+
+        .quota-tile-usage {
+            max-width: 100%;
+            color: var(--text-muted);
+            font-size: 8.5px;
+            line-height: 1;
             text-align: center;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
+        /* Detailed view reset line (shared by the detailed layout). */
         .quota-reset-line {
             display: inline-flex;
             align-items: center;
@@ -776,13 +821,6 @@
             color: var(--text-muted);
             font-size: 8px;
             line-height: 1;
-            white-space: nowrap;
-        }
-
-        .quota-usage-line {
-            font-size: 8px;
-            color: var(--text-muted);
-            opacity: 0.7;
             white-space: nowrap;
         }
 
@@ -1445,7 +1483,7 @@
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
-            .quota-item:last-child:nth-child(odd) {
+            .quota-tile:last-child:nth-child(odd) {
                 grid-column: 1 / -1;
             }
         }
@@ -2391,13 +2429,54 @@
             function renderStandardCard(provider, span) {
                 const quotas = providerQuotas(provider);
                 const columns = ringColumns(quotas.length);
+                const ringSize = ringSizeForColumns(columns);
                 return `
                     <article class="provider-card provider-card-standard status-${escapeHTML(provider.status || "healthy")}" style="--card-span:${span || cardSpan(provider)};">
-                        ${providerHeaderMarkup(provider)}
-                        <div class="quota-grid" style="--quota-cols:${columns};">
+                        ${standardHeaderMarkup(provider)}
+                        <div class="quota-grid" style="--quota-cols:${columns};--ring-size:${ringSize}px;">
                             ${quotas.map((quota) => renderStandardQuota(quota)).join("")}
                         </div>
                     </article>
+                `;
+            }
+
+            // ringSizeForColumns shrinks the ring when a card packs more quotas,
+            // so a four-quota card keeps clear space around every label at 360px.
+            function ringSizeForColumns(columns) {
+                if (columns >= 4) return 52;
+                if (columns === 3) return 56;
+                return 58;
+            }
+
+            function standardStatusLabel(provider) {
+                const status = String(provider && provider.status || "healthy");
+                if (status === "critical" || status === "danger") return "Critical";
+                if (status === "warning") return "Warning";
+                return "Healthy";
+            }
+
+            // standardHeaderMarkup keeps the icon next to a normally colored
+            // name, then a compact right cluster with the freshness label and a
+            // status dot whose tooltip carries the status.
+            function standardHeaderMarkup(provider) {
+                const status = String(provider && provider.status || "healthy");
+                const peak = Math.round(clampPercent(provider && provider.highest_percent));
+                const dotTitle = `${standardStatusLabel(provider)} - peak ${peak}%`;
+                return `
+                    <div class="provider-header">
+                        <div class="provider-copy">
+                            <span class="provider-icon ${escapeHTML(providerIconClass(provider))}" aria-hidden="true"></span>
+                            <span class="provider-name">${escapeHTML(provider.label)}</span>
+                            ${provider.connection?.reason === 'browser_access_denied' ? '<span class="quota-source-tag">Browser access required</span>' : provider.connection_status === 'reconnect' ? '<span class="quota-source-tag">Reconnect required</span>' : provider.connection_status === 'stale' ? '<span class="quota-source-tag">Updates unavailable</span>' : ''}
+                            ${provider.promo ? `<a class="promo-tag ${isPromoOffPeak(provider.promo) ? 'promo-offpeak' : 'promo-peak'}" href="https://www.reddit.com/r/ClaudeAI/comments/1s4idaq/update_on_session_limits/" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${escapeHTML(promoLabel(provider.promo))}</a>` : ''}
+                        </div>
+                        <span class="provider-meta">
+                            <span class="provider-updated">${escapeHTML(compactUpdatedLabel(provider.updated_at))}</span>
+                            <span class="provider-status-dot status-${escapeHTML(status)}" title="${escapeHTML(dotTitle)}" aria-label="${escapeHTML(dotTitle)}"></span>
+                        </span>
+                    </div>
+ ${provider.base_provider === "mistral" && provider.subtitle ? `<div class="quota-detail-meta">${escapeHTML(provider.subtitle)}</div>` : ""}
+ ${provider.base_provider === 'mistral' ? mistralRecovery.markup(provider.connection, provider.connection_status) : ''}
                 `;
             }
 
@@ -2423,19 +2502,39 @@
             }
 
             function renderStandardQuota(quota) {
+                const percent = clampPercent(quota.percent);
                 const usage = usageSummary(quota);
-                // Labels truncate at this density, so keep the full label and
-                // value available in hover tooltips.
                 const statusNote = quotaStatusNote(quota);
-                const fullLabel = (quota.label || compactQuotaLabel(quota.label, quota.key)) + statusNote;
-                const fullValue = usage ? `${usage} used` : `${Math.round(clampPercent(quota.percent))}%`;
+                const label = fullQuotaLabel(quota);
+                const fullLabel = label + statusNote;
+                const fullValue = usage ? `${usage} used` : `${Math.round(percent)}%`;
+                const reset = compactResetLabel(quota);
+                const resetTitle = `Resets ${quota.time_until_reset || quota.reset_at || 'unknown'}`;
                 return `
-                    <div class="quota-item status-${escapeHTML(quota.status || "healthy")}">
-                        ${pieChartMarkup(quota)}
-                        <span class="quota-label" title="${escapeHTML(fullLabel)}">${escapeHTML(compactQuotaLabel(quota.label, quota.key))}</span>
-                        <span class="quota-reset-line" title="Resets ${escapeHTML(quota.time_until_reset || quota.reset_at || 'unknown')}">${icons.clock}<span>${escapeHTML(compactResetLabel(quota))}</span></span>
-                        ${usage ? `<span class="quota-usage-line" title="${escapeHTML(fullValue)}">${escapeHTML(usage)} used</span>` : ''}
-                        ${sourceTagMarkup(quota)}
+                    <div class="quota-tile status-${escapeHTML(quota.status || "healthy")}">
+                        ${ringMarkup(percent, fullLabel, reset, resetTitle)}
+                        <span class="quota-tile-label" title="${escapeHTML(fullLabel)}">${escapeHTML(label)}</span>
+                        ${usage ? `<span class="quota-tile-usage" title="${escapeHTML(fullValue)}">${escapeHTML(usage)}</span>` : ''}
+                    </div>
+                `;
+            }
+
+            // ringMarkup draws the percent and the reset countdown inside the
+            // ring; the full label and usage live below the ring as tile text.
+            function ringMarkup(percent, fullLabel, reset, resetTitle) {
+                const circumference = 2 * Math.PI * 15.5;
+                const dash = (percent / 100) * circumference;
+                return `
+                    <div class="quota-ring">
+                        <svg class="quota-meter" viewBox="0 0 40 40" aria-hidden="true">
+                            <title>${escapeHTML(fullLabel)}: ${Math.round(percent)}%</title>
+                            <circle class="quota-track" cx="20" cy="20" r="15.5"></circle>
+                            <circle class="quota-fill" cx="20" cy="20" r="15.5" stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}"></circle>
+                        </svg>
+                        <span class="quota-ring-center">
+                            <span class="quota-ring-pct">${Math.round(percent)}<span class="quota-ring-unit">%</span></span>
+                            <span class="quota-ring-reset" title="${escapeHTML(resetTitle)}">${escapeHTML(reset)}</span>
+                        </span>
                     </div>
                 `;
             }
@@ -2480,22 +2579,6 @@
                     </div>
  ${provider.base_provider === "mistral" && provider.subtitle ? `<div class="quota-detail-meta">${escapeHTML(provider.subtitle)}</div>` : ""}
  ${provider.base_provider === 'mistral' ? mistralRecovery.markup(provider.connection, provider.connection_status) : ''}
-                `;
-            }
-
-            function pieChartMarkup(quota) {
-                const percent = clampPercent(quota.percent);
-                const circumference = 97.389;
-                const dash = (percent / 100) * circumference;
-                const fullLabel = (quota.label || compactQuotaLabel(quota.label, quota.key)) + quotaStatusNote(quota);
-                return `
-                    <svg class="quota-meter" viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
-                        <title>${escapeHTML(fullLabel)}: ${Math.round(percent)}%</title>
-                        <circle class="quota-track" cx="20" cy="20" r="15.5"></circle>
-                        <circle class="quota-fill" cx="20" cy="20" r="15.5" stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}"></circle>
-                        <circle class="quota-center" cx="20" cy="20" r="10.5"></circle>
-                        <text class="quota-percent" x="20" y="23" text-anchor="middle">${Math.round(percent)}%</text>
-                    </svg>
                 `;
             }
 
@@ -3121,7 +3204,10 @@
                 return normalized;
             }
 
-            function compactQuotaLabel(label, key) {
+            // quotaLabelSemantic maps a quota's key/label to a known short name,
+            // or "" when nothing matches. Shared by the truncating compact label
+            // and the wrapping full label so both agree on the wording.
+            function quotaLabelSemantic(label, key) {
                 const source = `${String(key || "").toLowerCase()} ${String(label || "").toLowerCase()}`;
                 if (source.includes("weekly sonnet") || source.includes("weekly_sonnet")) {
                     return "Wkly Son";
@@ -3207,8 +3293,34 @@
                 if (source.includes("requests")) {
                     return "Req";
                 }
+                return "";
+            }
+
+            function compactQuotaLabel(label, key) {
+                const semantic = quotaLabelSemantic(label, key);
+                if (semantic) {
+                    return semantic;
+                }
                 const text = String(label || key || "Quota").trim();
                 return text.length > 10 ? text.slice(0, 10) : text;
+            }
+
+            // fullQuotaLabel is the wrapping tile label: it keeps the semantic
+            // short names but never hard-truncates, so "Weekly Credits" and
+            // "Gemini Weekly" read in full. Claude + GPT windows keep their
+            // window suffix ("Cl+GPT Weekly").
+            function fullQuotaLabel(quota) {
+                const label = String(quota && quota.label || "").trim();
+                const key = String(quota && quota.key || "");
+                const source = `${key.toLowerCase()} ${label.toLowerCase()}`;
+                if (source.includes("claude + gpt") || source.includes("claude_+_gpt")) {
+                    return label.replace(/claude\s*\+\s*gpt/i, "Cl+GPT");
+                }
+                const semantic = quotaLabelSemantic(label, key);
+                if (semantic) {
+                    return semantic;
+                }
+                return label || key || "Quota";
             }
 
             function compactProviderName(label) {
