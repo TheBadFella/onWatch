@@ -11,7 +11,10 @@ func readStaticAppJS(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("read static/app.js: %v", err)
 	}
-	return string(data)
+	// Normalize CRLF: a Windows checkout writes the asset with CRLF, and tests
+	// that slice on "\n" (or match multi-line needles) would otherwise fail
+	// only there.
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func TestAppJS_TimezoneSettingsPopulateBeforeLoad(t *testing.T) {

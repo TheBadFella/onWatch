@@ -27,7 +27,9 @@ func readStaticFile(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
-	return string(data)
+	// Normalize CRLF so multi-line needles match on a Windows checkout, where
+	// the working tree (and thus the embedded asset) has CRLF line endings.
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func createTestConfigWithCommandCode() *config.Config {
