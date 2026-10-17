@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
@@ -63,6 +64,34 @@ type CodexTokenSaveFunc func(accessToken, refreshToken, idToken string, expiresI
 // codexOAuthRefreshFunc performs the OAuth token refresh. Production uses
 // api.RefreshCodexToken; tests inject a fake so no real refresh is attempted.
 type codexOAuthRefreshFunc func(ctx context.Context, refreshToken string) (*api.CodexOAuthTokenResponse, error)
+
+// codexRefreshCoordinator bounds recovery OAuth refreshes across agents that may
+// share a credential source. Codex refresh tokens are one-time use, so two
+// profiles pointing at the same token (same fingerprint) must not both consume
+// it. claim admits at most one refresh per fingerprint per window.
+type codexRefreshCoordinator struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+func newCodexRefreshCoordinator() *codexRefreshCoordinator {
+	return &codexRefreshCoordinator{last: make(map[string]time.Time)}
+}
+
+// claim reserves one refresh for the fingerprint. It reports false when another
+// agent already refreshed that fingerprint within the window.
+func (c *codexRefreshCoordinator) claim(fingerprint string, now time.Time, window time.Duration) bool {
+	if fingerprint == "" {
+		return true // unknown identity: never block a lone agent
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if last, ok := c.last[fingerprint]; ok && now.Sub(last) < window {
+		return false
+	}
+	c.last[fingerprint] = now
+	return true
+}
 
 // CodexCredentialFingerprintFunc returns a stable fingerprint of the credential
 // source the agent polls with (a profile file, or the global Codex/OpenCode
@@ -180,6 +209,21 @@ type CodexAgent struct {
 	// recovery poll is allowed and authRetryCount drives the escalating backoff.
 	authRetryAt    time.Time
 	authRetryCount int
+
+	// pauseSnapshot is the published, goroutine-safe view of the pause state.
+	// The fields above are owned by the poll goroutine; the web layer reads
+	// AuthPaused/PauseState from handler goroutines, so those read this atomic
+	// snapshot instead of the raw fields (issue #147 review). nil means not
+	// paused.
+	pauseSnapshot atomic.Pointer[CodexPauseState]
+
+	// refreshCoordinator bounds recovery refreshes across agents sharing a
+	// credential source. refreshTerminalFingerprint is the fingerprint whose
+	// refresh token is known dead (reused/invalid_grant): while it still
+	// matches the credential source, no further refresh is attempted. A
+	// re-authentication changes the fingerprint and clears this implicitly.
+	refreshCoordinator         *codexRefreshCoordinator
+	refreshTerminalFingerprint string
 
 	// now overrides the clock used by the auth-pause schedule. Tests only;
 	// nil means time.Now. Snapshot and quota-window timestamps deliberately
@@ -436,7 +480,23 @@ func (a *CodexAgent) pauseAuth(failedToken string) bool {
 	if a.authRetryAt.IsZero() {
 		a.authRetryAt = a.currentTime().Add(codexAuthPausedRetryInterval)
 	}
+	a.publishPauseState()
 	return newlyPaused
+}
+
+// publishPauseState republishes the atomic pause snapshot from the raw fields.
+// The raw fields are owned by the poll goroutine; the snapshot is what the web
+// layer reads, so time.Time values never tear across goroutines.
+func (a *CodexAgent) publishPauseState() {
+	if !a.authPaused {
+		a.pauseSnapshot.Store(nil)
+		return
+	}
+	a.pauseSnapshot.Store(&CodexPauseState{
+		Paused: true,
+		Since:  a.authPausedAt,
+		Reason: "Codex polling is paused after repeated authentication failures. Re-authenticate via 'codex auth' to resume.",
+	})
 }
 
 // currentFingerprint returns the credential source digest, or empty when no
@@ -449,6 +509,12 @@ func (a *CodexAgent) currentFingerprint() string {
 }
 
 // resumeAuth clears all auth pause state after credentials are known good.
+//
+// It deliberately does NOT reset proactiveRefreshFailures. That counter is a
+// safety fuse: it bounds how many times the proactive OAuth refresh may fail
+// before the agent stops hammering the token endpoint. Clearing it on every
+// successful poll would let a flapping endpoint re-arm the fuse endlessly.
+// It is reset only when a proactive refresh actually succeeds.
 func (a *CodexAgent) resumeAuth() {
 	a.authPaused = false
 	a.authFailCount = 0
@@ -458,6 +524,7 @@ func (a *CodexAgent) resumeAuth() {
 	a.authPausedAt = time.Time{}
 	a.authPauseLogged = false
 	a.lastFailedFingerprint = ""
+	a.publishPauseState()
 }
 
 // logPausedOnce emits the pause notice on the transition into the paused
@@ -475,22 +542,19 @@ func (a *CodexAgent) logPausedOnce(message string) {
 }
 
 // AuthPaused reports whether polling is currently paused pending
-// re-authentication. Safe to call from the web layer.
+// re-authentication. Safe to call from the web layer: it reads the atomic
+// snapshot published by the poll goroutine, never the raw fields.
 func (a *CodexAgent) AuthPaused() bool {
-	return a.authPaused
+	return a.pauseSnapshot.Load() != nil
 }
 
 // PauseState reports the pause state for API surfacing. Since is the time the
-// current pause began (zero when not paused).
+// current pause began (zero when not paused). Safe to call from the web layer.
 func (a *CodexAgent) PauseState() CodexPauseState {
-	if !a.authPaused {
-		return CodexPauseState{}
+	if snapshot := a.pauseSnapshot.Load(); snapshot != nil {
+		return *snapshot
 	}
-	return CodexPauseState{
-		Paused: true,
-		Since:  a.authPausedAt,
-		Reason: "Codex polling is paused after repeated authentication failures. Re-authenticate via 'codex auth' to resume.",
-	}
+	return CodexPauseState{}
 }
 
 // SetCredentialFingerprint wires a callback that returns a digest of the
@@ -533,26 +597,101 @@ func codexAuthRetryBackoff(attempt int) time.Duration {
 }
 
 // tryPausedAuthRecovery reports whether a paused agent may attempt one poll
-// this cycle, rescheduling the next attempt on an escalating backoff.
+// this cycle, rescheduling the next attempt on an escalating backoff. Before
+// re-polling it may make at most one bounded OAuth refresh attempt for the
+// window, so a transient token-endpoint outage does not strand a profile whose
+// refresh token is still good (issue #147 review).
 //
-// Unlike the Anthropic equivalent this never triggers an OAuth refresh: Codex
-// refresh tokens are one-time use, so a timer-driven refresh would burn
-// credentials the Codex CLI still needs. Re-attempting the poll with the stored
-// token recovers from server-side failures on its own, and the proactive
-// refresh in poll() still handles genuine expiry.
+// Codex refresh tokens are one-time use, so the refresh is deliberately
+// rate-limited: one attempt per backoff window, coordinated across agents that
+// share a fingerprint, and never repeated once the token is known dead
+// (reused / invalid_grant) until the credential source changes.
 func (a *CodexAgent) tryPausedAuthRecovery() bool {
 	now := a.currentTime()
 	if a.authRetryAt.IsZero() || now.Before(a.authRetryAt) {
 		return false
 	}
 
+	window := codexAuthRetryBackoff(a.authRetryCount + 1)
 	a.authRetryCount++
 	a.authRetryAt = now.Add(codexAuthRetryBackoff(a.authRetryCount))
 	a.logger.Info("Attempting recovery from paused Codex polling",
 		"attempt", a.authRetryCount,
 		"next_retry_at", a.authRetryAt,
 		"account_id", a.accountID)
+
+	a.tryRecoveryRefresh(now, window)
 	return true
+}
+
+// tryRecoveryRefresh makes at most one OAuth refresh attempt for the recovery
+// window, unless the refresh token is known dead. A success installs the fresh
+// access token and lifts the pause; a transient failure leaves the pause in
+// place for the next window.
+func (a *CodexAgent) tryRecoveryRefresh(now time.Time, window time.Duration) {
+	if a.credsRefresh == nil {
+		return
+	}
+	creds := a.credsRefresh()
+	if creds == nil || creds.RefreshToken == "" {
+		return
+	}
+	if a.store != nil && !a.store.AutoRefreshTokensEnabled() {
+		return
+	}
+	// The credential-source fingerprint identifies the refresh token for both
+	// the dead-token check and cross-agent dedup. It falls back to the token
+	// digest when no hook is wired.
+	fingerprint := a.currentFingerprint()
+	if fingerprint == "" {
+		fingerprint = codexTokenFingerprint(creds.AccessToken, creds.RefreshToken)
+	}
+	// A dead refresh token stays dead until the credential source changes.
+	if a.refreshTerminalFingerprint != "" && a.refreshTerminalFingerprint == fingerprint {
+		return
+	}
+	if a.refreshCoordinator != nil && !a.refreshCoordinator.claim(fingerprint, now, window) {
+		a.logger.Info("Skipping Codex recovery refresh - another agent refreshed this credential recently",
+			"account_id", a.accountID)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	newTokens, err := a.refreshCodexToken(ctx, creds.RefreshToken)
+	if err != nil {
+		if isCodexRefreshTerminalError(err) {
+			a.refreshTerminalFingerprint = fingerprint
+			a.logger.Error("Codex recovery refresh token is dead - stopping recovery refreshes until re-auth",
+				"error", err, "account_id", a.accountID)
+			return
+		}
+		a.logger.Warn("Codex recovery refresh failed - will retry next window",
+			"error", err, "account_id", a.accountID)
+		return
+	}
+
+	// Persist immediately: refresh tokens are one-time use.
+	saveFn := a.tokenSave
+	if saveFn == nil {
+		saveFn = api.WriteCodexCredentials
+	}
+	if err := saveFn(newTokens.AccessToken, newTokens.RefreshToken, newTokens.IDToken, newTokens.ExpiresIn); err != nil {
+		a.logger.Error("Failed to save recovery-refreshed Codex credentials", "error", err, "account_id", a.accountID)
+		return
+	}
+	a.client.SetToken(newTokens.AccessToken)
+	a.lastToken = newTokens.AccessToken
+	a.proactiveRefreshFailures = 0
+	a.resumeAuth()
+	a.logger.Info("Codex auth failure pause lifted - token refreshed during recovery",
+		"account_id", a.accountID)
+}
+
+// isCodexRefreshTerminalError reports whether a refresh failure means the
+// refresh token is dead and must not be replayed.
+func isCodexRefreshTerminalError(err error) bool {
+	return errors.Is(err, api.ErrCodexRefreshTokenReused) || errors.Is(err, api.ErrCodexRefreshTokenInvalid)
 }
 
 // NewCodexAgent creates a new CodexAgent with the given dependencies.

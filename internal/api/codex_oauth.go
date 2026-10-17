@@ -31,6 +31,12 @@ var ErrCodexOAuthRefreshFailed = errors.New("codex oauth: token refresh failed")
 // This is unrecoverable - the user must re-authenticate via Codex CLI.
 var ErrCodexRefreshTokenReused = errors.New("codex oauth: refresh token already used (re-authenticate via 'codex auth')")
 
+// ErrCodexRefreshTokenInvalid indicates the token endpoint rejected the refresh
+// token outright (for example invalid_grant). Like a reused token this is
+// terminal: replaying it cannot succeed and may burn a credential the Codex CLI
+// still needs, so callers must stop refreshing until the credentials change.
+var ErrCodexRefreshTokenInvalid = errors.New("codex oauth: refresh token invalid (re-authenticate via 'codex auth')")
+
 // CodexOAuthTokenResponse represents the response from OpenAI's OAuth token endpoint.
 type CodexOAuthTokenResponse struct {
 	TokenType    string `json:"token_type"`
@@ -97,9 +103,13 @@ func RefreshCodexTokenWithURL(ctx context.Context, refreshToken, tokenURL string
 	if resp.StatusCode != http.StatusOK {
 		var errResp codexOAuthErrorResponse
 		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			// Check for refresh token reuse (unrecoverable)
-			if errResp.Error == "invalid_grant" && strings.Contains(errResp.ErrorDescription, "reused") {
-				return nil, ErrCodexRefreshTokenReused
+			// invalid_grant means the refresh token is dead: rotated away/reused
+			// or revoked. Both are terminal - replaying it can never succeed.
+			if errResp.Error == "invalid_grant" {
+				if strings.Contains(errResp.ErrorDescription, "reused") {
+					return nil, ErrCodexRefreshTokenReused
+				}
+				return nil, fmt.Errorf("%w: %s - %s", ErrCodexRefreshTokenInvalid, errResp.Error, errResp.ErrorDescription)
 			}
 			return nil, fmt.Errorf("%w: %s - %s", ErrCodexOAuthRefreshFailed, errResp.Error, errResp.ErrorDescription)
 		}

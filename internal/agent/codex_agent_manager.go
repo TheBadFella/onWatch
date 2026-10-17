@@ -60,6 +60,11 @@ type CodexAgentManager struct {
 	profilesDir      string
 	scanInterval     time.Duration
 	lastScanProfiles map[string]time.Time // profile name -> modified time
+
+	// refreshCoordinator is shared by every profile agent so two profiles
+	// pointing at the same refresh token cannot both consume it during recovery
+	// (Codex refresh tokens are one-time use).
+	refreshCoordinator *codexRefreshCoordinator
 }
 
 // NewCodexAgentManager creates a new manager for multi-account Codex polling.
@@ -69,13 +74,14 @@ func NewCodexAgentManager(store *store.Store, tracker *tracker.CodexTracker, int
 	}
 
 	return &CodexAgentManager{
-		store:            store,
-		tracker:          tracker,
-		interval:         interval,
-		logger:           logger,
-		instances:        make(map[string]*CodexAgentInstance),
-		scanInterval:     30 * time.Second, // Check for new profiles every 30 seconds
-		lastScanProfiles: make(map[string]time.Time),
+		store:              store,
+		tracker:            tracker,
+		interval:           interval,
+		logger:             logger,
+		instances:          make(map[string]*CodexAgentInstance),
+		scanInterval:       30 * time.Second, // Check for new profiles every 30 seconds
+		lastScanProfiles:   make(map[string]time.Time),
+		refreshCoordinator: newCodexRefreshCoordinator(),
 	}
 }
 
@@ -545,6 +551,10 @@ func (m *CodexAgentManager) startAgentForProfile(profile CodexProfile) error {
 		}
 		return codexCredentialFingerprint(profilePath)
 	})
+
+	// Share one refresh coordinator across profiles so two agents pointing at
+	// the same one-time-use refresh token cannot both consume it.
+	agent.refreshCoordinator = m.refreshCoordinator
 
 	agent.SetCredentialsRefresh(func() *api.CodexCredentials {
 		if isDefaultProfile {
