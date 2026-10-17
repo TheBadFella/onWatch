@@ -79,7 +79,10 @@ func TestCodexAgent_PauseStateConcurrentWithPolling(t *testing.T) {
 		drivePauseResumeCycles(ctx, ag, &fingerprint, &healthy, 60)
 	}()
 
-	// Reader goroutines: mimic web handler calls into the agent.
+	// Reader goroutines: mimic web handler calls into the agent. A short sleep
+	// between reads keeps them overlapping the poll writer without pinning a
+	// core for the whole window - a tight loop starves the interval-based
+	// polling tests that run in parallel on the low-core CI runners.
 	var reads atomic.Int64
 	for r := 0; r < 4; r++ {
 		wg.Add(1)
@@ -91,6 +94,7 @@ func TestCodexAgent_PauseStateConcurrentWithPolling(t *testing.T) {
 				state := ag.PauseState()
 				_ = state.Since
 				reads.Add(1)
+				time.Sleep(time.Millisecond)
 			}
 		}()
 	}
@@ -157,6 +161,7 @@ func TestCodexAgentManager_PausedAccountsConcurrentWithPolling(t *testing.T) {
 			deadline := time.Now().Add(3 * time.Second)
 			for time.Now().Before(deadline) {
 				_ = fx.manager.PausedAccounts()
+				time.Sleep(time.Millisecond)
 			}
 		}()
 	}
