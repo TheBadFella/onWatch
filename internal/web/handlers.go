@@ -378,7 +378,8 @@ func (h *Handler) codexProfilesList(w http.ResponseWriter, r *http.Request) {
 // codexProfileSave saves the current Codex auth as a new profile.
 func (h *Handler) codexProfileSave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		AuthData string `json:"auth_data,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -393,10 +394,16 @@ func (h *Handler) codexProfileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect current Codex credentials
-	creds := api.DetectCodexCredentials(h.logger)
+	// Detect current Codex credentials or use user-provided AuthData
+	var creds *api.CodexCredentials
+	if req.AuthData != "" {
+		creds = parseRawAuthData(req.AuthData)
+	}
+	if creds == nil {
+		creds = api.DetectCodexCredentials(h.logger)
+	}
 	if creds == nil || (creds.AccessToken == "" && creds.APIKey == "") {
-		respondError(w, http.StatusBadRequest, "no Codex credentials found. Run 'codex auth' first to authenticate")
+		respondError(w, http.StatusBadRequest, "no Codex credentials found. Please sign in via device auth or provide valid auth.json")
 		return
 	}
 

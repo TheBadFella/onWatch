@@ -244,6 +244,10 @@ func (s *WebhookSender) deliver(payload WebhookPayload, probe bool) error {
 	if err != nil {
 		return fmt.Errorf("notify.Webhook: encode payload: %w", err)
 	}
+	body, err = formatWebhookBody(s.cfg.URL, payload, body)
+	if err != nil {
+		return fmt.Errorf("notify.Webhook: encode payload: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
