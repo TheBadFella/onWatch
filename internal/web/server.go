@@ -96,6 +96,8 @@ func NewServer(port int, handler *Handler, logger *slog.Logger, username, passwo
 	mux.HandleFunc(p("/api/codex/device-auth/poll"), handler.CodexDeviceAuthPoll)
 	mux.HandleFunc(p("/api/codex/usage"), handler.CodexUsage)
 	mux.HandleFunc(p("/api/codex/accounts/usage"), handler.CodexAccountsUsage)
+	mux.HandleFunc(p("/api/gemini/import-token"), handler.GeminiImportTokenRoute)
+	mux.HandleFunc(p("/api/gemini/import-status"), handler.GeminiImportStatus)
 	mux.HandleFunc(p("/api/minimax/current"), handler.currentMiniMax)
 	mux.HandleFunc(p("/api/minimax/history"), handler.historyMiniMax)
 	mux.HandleFunc(p("/api/minimax/cycles"), handler.cyclesMiniMax)
