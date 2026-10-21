@@ -5107,7 +5107,16 @@ function renderAccountsOverview(provider, accounts) {
     return;
   }
 
-  container.innerHTML = accounts.map((account, idx) => accountOverviewCardHTML(provider, account, idx)).join('');
+  const html = accounts.map((account, idx) => accountOverviewCardHTML(provider, account, idx)).join('');
+  const existing = [...container.querySelectorAll('.account-overview-card')];
+  const accountIds = accounts.map((account, idx) => String(account.accountId || account.id || idx + 1));
+  if (existing.length === accounts.length && existing.every((card, idx) => card.dataset.accountId === accountIds[idx])) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    [...template.content.children].forEach((card, idx) => patchOverviewNode(existing[idx], card));
+    return;
+  }
+  container.innerHTML = html;
 
   const drill = (accountId) => {
     if (provider === 'minimax') switchMiniMaxAccount(accountId);

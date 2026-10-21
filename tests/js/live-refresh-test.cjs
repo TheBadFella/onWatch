@@ -48,11 +48,39 @@ test('reinitialization replaces the old timer and visibility listener',()=>{
 test('unchanged snapshots avoid chart redraws while new snapshots and manual refreshes still render',()=>{
   const context=vm.createContext({document:{addEventListener(){}}});
   const ui=fs.readFileSync(path.join(__dirname,'../../internal/web/static/fork-ui.js'),'utf8');vm.runInContext(ui,context);
-  const first={capturedAt:'2026-10-21T12:00:00Z',quotas:[{utilization:30,timeUntilResetSeconds:3600}]};
+  const first={capturedAt:'2026-10-21T12:00:00Z',quotas:[{utilization:30,timeUntilResetSeconds:3600,timeUntilReset:'1h 0m',ageSeconds:1}]};
   assert.equal(context.shouldRenderLiveData('codex:all',first),true);
-  assert.equal(context.shouldRenderLiveData('codex:all',{...first,quotas:[{utilization:30,timeUntilResetSeconds:3595}]}),false);
+  assert.equal(context.shouldRenderLiveData('codex:all',{...first,quotas:[{utilization:30,timeUntilResetSeconds:3595,timeUntilReset:'59m 55s',ageSeconds:6}]}),false);
   assert.equal(context.shouldRenderLiveData('codex:all',{...first,capturedAt:'2026-10-21T12:01:00Z'}),true);
   assert.equal(context.shouldRenderLiveData('codex:other',first),true);
   assert.equal(context.shouldRenderLiveData('codex:other',first,true),true);
   assert.equal(context.shouldRenderLiveData('codex:other',{...first,paused:true}),true);
+});
+
+test('overview updates keep card, progress bar, and text node identities',()=>{
+  const context=vm.createContext({document:{addEventListener(){}}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../../internal/web/static/fork-ui.js'),'utf8'),context);
+  function element(name, attrs={}, children=[]) {
+    return {nodeType:1,nodeName:name,childNodes:children,values:{...attrs},writes:0,
+      get attributes(){return Object.entries(this.values).map(([name,value])=>({name,value}));},
+      hasAttribute(name){return name in this.values;},getAttribute(name){return this.values[name];},
+      setAttribute(name,value){this.values[name]=value;this.writes++;},removeAttribute(name){delete this.values[name];this.writes++;},
+      appendChild(){assert.fail('usage update must not append nodes');},replaceWith(){assert.fail('usage update must not replace nodes');},
+    };
+  }
+  const text={nodeType:3,nodeName:'#text',nodeValue:'38.0%'};
+  const bar=element('DIV',{style:'width: 38.0%','data-status':'healthy'});
+  const label=element('SPAN',{},[text]);
+  const card=element('ARTICLE',{'data-account-id':'2'},[label,bar]);
+  const next=element('ARTICLE',{'data-account-id':'2'},[
+    element('SPAN',{},[{nodeType:3,nodeName:'#text',nodeValue:'46.0%'}]),
+    element('DIV',{style:'width: 46.0%','data-status':'warning'}),
+  ]);
+  context.patchOverviewNode(card,next);
+  assert.equal(card.childNodes[0],label);assert.equal(label.childNodes[0],text);
+  assert.equal(card.childNodes[1],bar);assert.equal(text.nodeValue,'46.0%');
+  assert.equal(bar.values.style,'width: 46.0%');assert.equal(bar.values['data-status'],'warning');
+  assert.equal(card.writes,0);
+  context.patchOverviewNode(card,next);assert.equal(bar.writes,2);
+  assert.match(app,/patchOverviewNode\(existing\[idx\], card\)/);
 });
