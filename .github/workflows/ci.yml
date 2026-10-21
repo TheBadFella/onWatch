@@ -38,8 +38,8 @@ jobs:
         run: go vet ./...
       - name: Test Linux daemon
         run: go test -race -timeout 15m -count=1 ./...
-      - name: Test SMTP settings
-        run: node --test tests/js/smtp-events-test.cjs
+      - name: Test dashboard controls
+        run: node --test tests/js/*-test.cjs
 
   ci-ok:
     name: CI OK

@@ -1,12 +1,17 @@
 {{define "content"}}
 <div class="app" data-poll-interval="{{.PollIntervalSec}}">
-    <header class="app-header">
+    <aside class="app-header app-sidebar" id="app-sidebar" aria-label="Main navigation">
+        <div class="sidebar-heading">
         <a href="#" class="header-brand" id="scroll-top" aria-label="Scroll to top">
             <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93L4.93 19.07"/>
             </svg>
             <span class="brand-text">onWatch</span>
         </a>
+        <button class="header-btn sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" aria-controls="app-sidebar" title="Collapse sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4zM9 4v16M15 9l-3 3 3 3"/></svg>
+        </button>
+        </div>
         {{if gt (len .Providers) 1}}
         <div class="provider-tabs" id="provider-tabs" role="tablist" aria-label="Select provider">
             {{range .Providers}}
@@ -89,7 +94,8 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </a>
         </div>
-    </header>
+    </aside>
+    <button class="sidebar-backdrop" id="sidebar-backdrop" aria-label="Close sidebar" type="button" tabindex="-1"></button>
 
     <main id="main-content" class="main-content">
         <div class="welcome-banner">

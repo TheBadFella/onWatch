@@ -238,25 +238,11 @@ ls -lh dist/
 
 ### GitHub Actions
 
-The workflow at `.github/workflows/release.yml` triggers on:
+In this fork, pushes to `main` publish the Linux AMD64 Alpine image. The manual
+`release.yml` workflow accepts an existing tag and reuses that image build before
+publishing a Linux binary and checksum. See [fork dashboard and image delivery](FORK_UI.md)
+for cache behavior, image tags, browser asset revisions, and rollback.
 
-- **Tag push** (`v*`): Builds all platforms and creates a GitHub Release
-- **Manual dispatch**: Optionally creates a release with the `publish` input
-
-To release:
-
-```bash
-# Update VERSION file
-echo "2.10.4" > VERSION
-
-# Commit, tag, push
-git add VERSION
-git commit -m "chore: bump version to 2.10.4"
-git tag v2.10.4
-git push && git push --tags
-```
-
-The workflow builds, tests, and publishes binaries automatically.
 
 ---
 
@@ -541,4 +527,5 @@ other operating systems, Alpine, or desktop tray builds. Installer, Nix, and
 standalone release-artifact builds are outside this CI gate.
 
 The **Sync Upstream & Build** workflow publishes the Alpine image on pushes to
-`main`. Tagged release workflows remain separate from routine CI.
+`main`, in parallel with CI. Manual releases reuse the same cached Linux build.
+See [fork dashboard and image delivery](FORK_UI.md).
