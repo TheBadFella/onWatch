@@ -5040,6 +5040,7 @@ function accountOverviewQuotas(provider, account) {
       percent: typeof q.usagePercent === 'number' ? q.usagePercent : 0,
       status: q.status || 'healthy',
       resetAt: q.resetAt || null,
+      remaining: typeof q.usagePercent === 'number' ? Math.max(0, 100 - q.usagePercent) : null,
     }));
   }
   const visible = filterCodexQuotasForPlan(account.quotas || [], account.planType);
@@ -5049,6 +5050,7 @@ function accountOverviewQuotas(provider, account) {
     percent: typeof q.cardPercent === 'number' ? q.cardPercent : (q.utilization || 0),
     status: q.status || 'healthy',
     resetAt: q.resetsAt || null,
+    remaining: typeof q.utilization === 'number' ? Math.max(0, 100 - q.utilization) : null,
   }));
 }
 
@@ -5075,7 +5077,8 @@ function accountOverviewCardHTML(provider, account, idx) {
           <div class="progress-bar" role="progressbar" aria-valuenow="${Math.round(r.percent)}" aria-valuemin="0" aria-valuemax="100">
             <div class="progress-fill" style="width: ${pct}%" data-status="${r.status}"></div>
           </div>
-          ${reset ? `<div class="aoq-reset" data-reset-at="${r.resetAt}">${reset}</div>` : ''}
+          ${r.remaining !== null ? `<div class="aoq-available">${r.remaining.toFixed(1)}% available</div>` : ''}
+          <div class="aoq-reset-row">${overviewResetHTML(r.resetAt)}${reset ? `<span class="aoq-reset" data-reset-at="${escapeHTML(r.resetAt)}">${escapeHTML(reset)}</span>` : ''}</div>
         </div>`;
       }).join('');
 
@@ -6846,7 +6849,7 @@ function normalizeBothQuotas(provider, payload) {
       cardLabel: quota.cardLabel || 'Utilization',
       status: quota.status || 'healthy',
       timeUntilResetSeconds: quota.timeUntilResetSeconds || 0,
-      resetsAt: quota.resetsAt || quota.renewsAt || quota.resets_at || quota.resetAt || '',
+      resetsAt: quota.resetsAt || quota.renewsAt || quota.resets_at || quota.resetAt || quota.resetTime || quota.resetDate || '',
     };
   });
 }
@@ -7082,7 +7085,7 @@ function renderProviderKPIHTML(quotas, provider) {
       || '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>';
     const resetText = quota.resetsAt ? formatResetTime(quota.resetsAt) : '';
     const resetAttr = quota.resetsAt ? ` data-reset-at="${escapeHTML(quota.resetsAt)}"` : '';
-    const countdown = quota.timeUntilResetSeconds > 0 ? formatDuration(quota.timeUntilResetSeconds) : '--:--';
+    const countdown = overviewResetHTML(quota.resetsAt, quota.timeUntilResetSeconds);
 
     return `<article class="quota-card provider-kpi-card" data-quota="${escapeHTML(quota.name || '')}">
       <header class="card-header">
@@ -7094,7 +7097,7 @@ function renderProviderKPIHTML(quotas, provider) {
           </h2>
           ${subtitle ? `<div class="quota-subtitle">${escapeHTML(subtitle)}</div>` : ''}
         </div>
-        <span class="countdown">${escapeHTML(countdown)}</span>
+        ${countdown}
       </header>
       <div class="progress-stats">
         <span class="usage-percent">${percent.toFixed(1)}%</span>
@@ -7684,11 +7687,12 @@ function renderAllProvidersView() {
           <span>${escapeHTML(entry.title)}</span>
           ${badge}${promo}
         </div>
+        <div class="provider-card-actions">${providerResetHTML(entry)}
         <button class="provider-card-collapse-btn" type="button" data-card-key="${entry.cardKey}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHTML(entry.title)}">
           <svg class="provider-card-collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="m9 6 6 6-6 6"/>
           </svg>
-        </button>
+        </button></div>
       </header>`;
     if (Array.isArray(entry.accountsGroup)) {
       const cards = entry.accountsGroup
