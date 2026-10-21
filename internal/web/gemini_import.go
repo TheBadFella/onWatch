@@ -50,8 +50,8 @@ func (h *Handler) GeminiImportToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
 		AccessToken  string `json:"access_token"`
-		ExpiresAt    int64  `json:"expires_at"`   // Unix milliseconds (optional)
-		ExpiryDate   int64  `json:"expiry_date"`  // Gemini CLI format (optional)
+		ExpiresAt    int64  `json:"expires_at"`  // Unix milliseconds (optional)
+		ExpiryDate   int64  `json:"expiry_date"` // Gemini CLI format (optional)
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -120,10 +120,10 @@ func (h *Handler) GeminiImportStatus(w http.ResponseWriter, r *http.Request) {
 
 	stored := accessToken != "" || refreshToken != ""
 	resp := map[string]interface{}{
-		"stored":          stored,
-		"has_access":      accessToken != "",
-		"has_refresh":     refreshToken != "",
-		"expires_at_ms":   expiresAtMs,
+		"stored":        stored,
+		"has_access":    accessToken != "",
+		"has_refresh":   refreshToken != "",
+		"expires_at_ms": expiresAtMs,
 	}
 
 	if stored && expiresAtMs > 0 {
