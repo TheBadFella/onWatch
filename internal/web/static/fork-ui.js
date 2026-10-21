@@ -93,8 +93,35 @@ document.addEventListener('DOMContentLoaded', setupSidebar);
 // charts merely because the server's reset countdown is a few seconds lower.
 const liveDataSignatures = new Map();
 function shouldRenderLiveData(key, data, force = false) {
-  const signature = JSON.stringify(data, (name, value) => name === 'timeUntilResetSeconds' ? undefined : value);
+  const signature = JSON.stringify(data, (name, value) =>
+    name === 'timeUntilResetSeconds' || name === 'timeUntilReset' || name === 'ageSeconds' ? undefined : value);
   const unchanged = liveDataSignatures.get(key) === signature;
   liveDataSignatures.set(key, signature);
   return force || !unchanged;
+}
+
+// Keep card nodes (and focus/listeners) alive when only usage values change.
+function patchOverviewNode(current, next) {
+  if (current.nodeType !== next.nodeType || current.nodeName !== next.nodeName) {
+    current.replaceWith(next.cloneNode(true));
+    return;
+  }
+  if (current.nodeType === 3) {
+    if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+    return;
+  }
+  if (current.nodeType !== 1) return;
+  for (const attr of [...current.attributes]) {
+    if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);
+  }
+  for (const attr of next.attributes) {
+    if (current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
+  }
+  const previous = [...current.childNodes];
+  const incoming = [...next.childNodes];
+  incoming.forEach((node, index) => {
+    if (previous[index]) patchOverviewNode(previous[index], node);
+    else current.appendChild(node.cloneNode(true));
+  });
+  previous.slice(incoming.length).forEach(node => node.remove());
 }

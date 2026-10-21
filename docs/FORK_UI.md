@@ -31,7 +31,9 @@ requests remain in the background agent; opening extra tabs does not multiply
 those requests. History, insights, and visible tables refresh once per minute.
 Hidden tabs pause automatic data refresh and catch up when visible again. Slow
 requests do not overlap. Unchanged snapshots keep existing cards and charts;
-countdowns continue locally. Manual refresh still forces a render.
+countdowns continue locally. Account overview cards update their text, progress
+bars, and status in place, preserving focus and avoiding entrance animations
+when fresh snapshots arrive. Manual refresh still fetches immediately.
 
 This server uses `ONWATCH_POLL_INTERVAL: 60` in its OnWatch Compose environment,
 so enabled providers are polled about once per minute. Other deployments can set
