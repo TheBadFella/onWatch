@@ -10274,6 +10274,12 @@ async function loadSettings() {
       }
     }
 
+    const emailEvents = data.smtp?.events;
+    ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure'].forEach(event => {
+      const input = document.getElementById('smtp-event-' + event.replaceAll('_', '-'));
+      if (input) input.checked = emailEvents ? emailEvents[event] === true : !event.startsWith('starter_');
+    });
+
     // Notifications
     if (data.notifications) {
       const n = data.notifications;
@@ -12087,6 +12093,9 @@ function gatherSettings() {
   const smtpHost = document.getElementById('smtp-host');
   if (smtpHost) {
     settings.smtp = {
+      events: Object.fromEntries(['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure'].map(event => [
+        event, document.getElementById('smtp-event-' + event.replaceAll('_', '-'))?.checked ?? false,
+      ])),
       host: smtpHost.value.trim(),
       port: parseInt(document.getElementById('smtp-port')?.value) || 587,
       protocol: document.getElementById('smtp-protocol')?.value || 'auto',

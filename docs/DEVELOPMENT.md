@@ -531,3 +531,14 @@ launchctl print gui/$UID/dev.onllm.onwatch    # detail, if it is installed
 ```
 
 `Auto-start: not installed` means nothing starts onWatch at login - `onwatch service install` fixes it. If it is installed but the job never starts, look at `last exit code` in `launchctl print`: `78: EX_CONFIG` means the plist points at a `WorkingDirectory` or program path that no longer exists (reinstall with `onwatch service install` from the binary you actually run).
+
+## CI in this fork
+
+Routine CI targets the Linux daemon used by the self-hosted Docker stack. It
+checks Go formatting, runs vet and race tests, and tests the SMTP settings
+controls with Node.js. It does not collect coverage or repeat the suite for
+other operating systems, Alpine, or desktop tray builds. Installer, Nix, and
+standalone release-artifact builds are outside this CI gate.
+
+The **Sync Upstream & Build** workflow publishes the Alpine image on pushes to
+`main`. Tagged release workflows remain separate from routine CI.

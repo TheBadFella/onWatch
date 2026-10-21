@@ -13,14 +13,15 @@ import (
 
 // SMTPConfig holds SMTP connection settings.
 type SMTPConfig struct {
-	Host     string   // SMTP server hostname
-	Port     int      // SMTP server port (25, 465, 587)
-	Username string   // SMTP auth username
-	Password string   // SMTP auth password (plaintext or decrypted)
-	Protocol string   // "auto", "tls" (implicit TLS), "starttls" (explicit upgrade), "none" (plaintext)
-	FromAddr string   // Sender email address
-	FromName string   // Sender display name
-	ToAddrs  []string // Recipient email addresses
+	Events   *WebhookEvents // nil preserves legacy email delivery; otherwise filters by event
+	Host     string         // SMTP server hostname
+	Port     int            // SMTP server port (25, 465, 587)
+	Username string         // SMTP auth username
+	Password string         // SMTP auth password (plaintext or decrypted)
+	Protocol string         // "auto", "tls" (implicit TLS), "starttls" (explicit upgrade), "none" (plaintext)
+	FromAddr string         // Sender email address
+	FromName string         // Sender display name
+	ToAddrs  []string       // Recipient email addresses
 }
 
 // SMTPMailer sends email notifications via SMTP.

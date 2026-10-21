@@ -40,6 +40,21 @@ The test button uses the *saved* configuration, so save before testing.
 | `starter_failure` | The Codex auto quota-starter ping failed |
 | `test` | You press **Send Test Webhook** |
 
+## Selecting email events in this fork
+
+This fork adds **Email Events** under **Settings -> Notifications ->
+SMTP Configuration**. Choose warning, critical, reset, auth error, quota-starter
+success, and quota-starter failure independently from **Webhook Events**. For
+example, select only **Auth error alerts** for email and keep quota alerts on the
+webhook. Enable the matching global notification switches and delivery channels,
+then save. Global switches and per-quota exclusions still apply to quota alerts.
+Quota-starter outcomes use their channel event selections directly.
+
+Existing SMTP settings keep their previous behavior until you save an event
+selection: enabled quota and auth alerts continue to email, and starter emails
+remain off. Clearing every email event suppresses automatic emails. **Send Test
+Email** still uses the saved SMTP connection regardless of event selections.
+
 ## Payload
 
 `POST` with `Content-Type: application/json`:
