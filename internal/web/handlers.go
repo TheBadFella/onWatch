@@ -466,6 +466,12 @@ func (h *Handler) codexProfileSave(w http.ResponseWriter, r *http.Request) {
 		h.store.GetOrCreateProviderAccountByExternalID("codex", req.Name, externalID)
 	}
 
+	if h.config != nil {
+		h.config.WriteLock()
+		h.config.CodexHasProfiles = true
+		h.config.WriteUnlock()
+	}
+
 	respondJSON(w, http.StatusCreated, map[string]interface{}{
 		"message":   "profile saved",
 		"name":      req.Name,

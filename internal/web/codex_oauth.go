@@ -271,6 +271,12 @@ func (h *Handler) CodexDeviceAuthPoll(w http.ResponseWriter, r *http.Request) {
 		h.store.GetOrCreateProviderAccountByExternalID("codex", name, extID)
 	}
 
+	if h.config != nil {
+		h.config.WriteLock()
+		h.config.CodexHasProfiles = true
+		h.config.WriteUnlock()
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"status":  "success",
 		"message": "Profile saved and linked successfully",
