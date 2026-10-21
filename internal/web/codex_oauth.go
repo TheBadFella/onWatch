@@ -3,9 +3,11 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,7 +146,7 @@ func (h *Handler) CodexDeviceAuthPoll(w http.ResponseWriter, r *http.Request) {
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(respBytes, &errData)
-		if errData.Error.Code == "deviceauth_authorization_pending" || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusBadRequest {
+		if errData.Error.Code == "deviceauth_authorization_pending" || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
 			respondJSON(w, http.StatusOK, map[string]interface{}{
 				"status": "pending",
 			})
@@ -154,18 +156,47 @@ func (h *Handler) CodexDeviceAuthPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Successfully received tokens
-	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		IDToken      string `json:"id_token"`
+	// The device endpoint returns a PKCE authorization code, not OAuth tokens.
+	var authorization struct {
+		Code     string `json:"authorization_code"`
+		Verifier string `json:"code_verifier"`
 	}
-	if err := json.Unmarshal(respBytes, &tokenResp); err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to parse token response")
+	if json.Unmarshal(respBytes, &authorization) != nil || authorization.Code == "" || authorization.Verifier == "" {
+		respondError(w, http.StatusBadGateway, "OpenAI returned an incomplete device authorization")
 		return
 	}
-
-	accountID := ""
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {api.CodexOAuthClientID},
+		"code":          {authorization.Code},
+		"code_verifier": {authorization.Verifier},
+		"redirect_uri":  {"https://auth.openai.com/deviceauth/callback"},
+	}
+	exchangeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, api.CodexOAuthTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to build token exchange")
+		return
+	}
+	exchangeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	exchangeResp, err := http.DefaultClient.Do(exchangeReq)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "failed to exchange device authorization")
+		return
+	}
+	defer exchangeResp.Body.Close()
+	var tokenResp api.CodexOAuthTokenResponse
+	if exchangeResp.StatusCode != http.StatusOK {
+		respondError(w, http.StatusBadGateway, "OpenAI rejected the device authorization exchange")
+		return
+	}
+	if json.NewDecoder(io.LimitReader(exchangeResp.Body, 1<<20)).Decode(&tokenResp) != nil || tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
+		respondError(w, http.StatusBadGateway, "OpenAI returned incomplete OAuth credentials")
+		return
+	}
+	accountID := codexTokenAccountID(tokenResp.IDToken)
+	if accountID == "" {
+		accountID = codexTokenAccountID(tokenResp.AccessToken)
+	}
 	userID := api.ParseIDTokenUserID(tokenResp.IDToken)
 
 	// Save profile to disk
@@ -196,7 +227,19 @@ func (h *Handler) CodexDeviceAuthPoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profilePath := filepath.Join(profilesDir, name+".json")
-	if err := os.WriteFile(profilePath, data, 0o600); err != nil {
+	temp, err := os.CreateTemp(profilesDir, ".device-auth-*")
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create profile file")
+		return
+	}
+	defer os.Remove(temp.Name())
+	_, writeErr := temp.Write(data)
+	closeErr := temp.Close()
+	if writeErr != nil || closeErr != nil {
+		respondError(w, http.StatusInternalServerError, "failed to write profile file")
+		return
+	}
+	if err := os.Rename(temp.Name(), profilePath); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to write profile file")
 		return
 	}
@@ -266,4 +309,25 @@ func parseRawAuthData(raw string) *api.CodexCredentials {
 		}
 	}
 	return nil
+}
+
+// codexTokenAccountID reads identity metadata; token validity is checked by the provider.
+func codexTokenAccountID(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Auth struct {
+			AccountID string `json:"chatgpt_account_id"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.Auth.AccountID)
 }

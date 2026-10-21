@@ -212,14 +212,15 @@ func (e *NotificationEngine) Reload() error {
 
 // smtpSettingsJSON matches the JSON shape saved by the handler's UpdateSettings.
 type smtpSettingsJSON struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Protocol    string `json:"protocol"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	FromAddress string `json:"from_address"`
-	FromName    string `json:"from_name"`
-	To          string `json:"to"`
+	Events      *WebhookEvents `json:"events,omitempty"`
+	Host        string         `json:"host"`
+	Port        int            `json:"port"`
+	Protocol    string         `json:"protocol"`
+	Username    string         `json:"username"`
+	Password    string         `json:"password"`
+	FromAddress string         `json:"from_address"`
+	FromName    string         `json:"from_name"`
+	To          string         `json:"to"`
 }
 
 // ConfigureSMTP initializes or updates the SMTP mailer from DB settings.
@@ -305,6 +306,7 @@ func (e *NotificationEngine) ConfigureSMTP() error {
 	}
 
 	cfg := SMTPConfig{
+		Events:   s.Events,
 		Host:     s.Host,
 		Port:     port,
 		Username: s.Username,
@@ -579,7 +581,7 @@ func (e *NotificationEngine) sendNotification(channels channelSet, policy repeat
 	sent := false
 
 	// Send via email if enabled and configured
-	if channels.enabled.Email && channels.mailer != nil {
+	if channels.emailEnabled(notifType) {
 		if err := channels.mailer.Send(subject, body); err != nil {
 			e.logger.Error("failed to send email notification", "error", err,
 				"quota", quotaKey, "type", notifType)
@@ -728,7 +730,7 @@ func (e *NotificationEngine) SendAuthErrorNotification(alert AuthErrorAlert) boo
 	sent := false
 
 	// Send via email if enabled and configured
-	if channels.enabled.Email && channels.mailer != nil {
+	if channels.emailEnabled(EventAuthError) {
 		if err := channels.mailer.Send(subject, body); err != nil {
 			e.logger.Error("failed to send auth error email", "error", err, "provider", alert.Provider)
 		} else {
@@ -839,6 +841,17 @@ func (c channelSet) any() bool {
 		(c.enabled.Webhook && c.webhook != nil)
 }
 
+// emailEnabled preserves legacy email types when no selection has been saved.
+func (c channelSet) emailEnabled(event string) bool {
+	if !c.enabled.Email || c.mailer == nil {
+		return false
+	}
+	if events := c.mailer.config.Events; events != nil {
+		return events.Enabled(event)
+	}
+	return event != EventStarterSuccess && event != EventStarterFailure
+}
+
 // webhookEnabled reports whether the webhook channel should deliver this event.
 func (c channelSet) webhookEnabled(event string) bool {
 	return c.enabled.Webhook && c.webhook != nil && c.webhook.Enabled(event)
@@ -946,7 +959,7 @@ type StarterEvent struct {
 	Detail    string // failure reason, or extra context on success
 }
 
-// SendStarterEvent delivers an auto quota-starter outcome to the webhook channel.
+// SendStarterEvent delivers an auto quota-starter outcome to selected channels.
 //
 // Starter pings are operational events rather than quota-cycle alerts, so they
 // are not written to the notification log and are not deduplicated per cycle.
@@ -954,14 +967,14 @@ type StarterEvent struct {
 // retries of failed starts, which bounds how often this can fire.
 func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 	e.mu.RLock()
-	channels := channelSet{webhook: e.webhookSender, enabled: e.cfg.Channels}
+	channels := channelSet{mailer: e.mailer, webhook: e.webhookSender, enabled: e.cfg.Channels}
 	e.mu.RUnlock()
 
 	event := EventStarterFailure
 	if ev.Success {
 		event = EventStarterSuccess
 	}
-	if !channels.webhookEnabled(event) {
+	if !channels.webhookEnabled(event) && !channels.emailEnabled(event) {
 		return
 	}
 
@@ -986,6 +999,15 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
+	if channels.emailEnabled(event) {
+		body := message
+		if ev.AccountID != "" {
+			body += "\nAccount: " + ev.AccountID
+		}
+		if err := channels.mailer.Send(title, body); err != nil {
+			e.logger.Error("failed to send quota-starter email", "error", err, "event", event)
+		}
+	}
 	channels.deliverWebhook(e.logger, payload)
 }
 

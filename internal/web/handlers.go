@@ -7488,14 +7488,15 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Handle SMTP settings
 	if raw, ok := body["smtp"]; ok {
 		var smtp struct {
-			Host        string `json:"host"`
-			Port        int    `json:"port"`
-			Protocol    string `json:"protocol"`
-			Username    string `json:"username"`
-			Password    string `json:"password"`
-			FromAddress string `json:"from_address"`
-			FromName    string `json:"from_name"`
-			To          string `json:"to"`
+			Events      *notify.WebhookEvents `json:"events,omitempty"`
+			Host        string                `json:"host"`
+			Port        int                   `json:"port"`
+			Protocol    string                `json:"protocol"`
+			Username    string                `json:"username"`
+			Password    string                `json:"password"`
+			FromAddress string                `json:"from_address"`
+			FromName    string                `json:"from_name"`
+			To          string                `json:"to"`
 		}
 		if err := json.Unmarshal(raw, &smtp); err != nil {
 			respondError(w, http.StatusBadRequest, "invalid smtp value")
@@ -7522,6 +7523,17 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 					respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid recipient address: %s", addr))
 					return
 				}
+			}
+		}
+
+		// Older clients omit event filters when editing connection settings.
+		if smtp.Events == nil {
+			existingJSON, _ := h.store.GetSetting("smtp")
+			var existing struct {
+				Events *notify.WebhookEvents `json:"events"`
+			}
+			if json.Unmarshal([]byte(existingJSON), &existing) == nil {
+				smtp.Events = existing.Events
 			}
 		}
 

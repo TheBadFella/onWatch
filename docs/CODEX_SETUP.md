@@ -4,6 +4,21 @@ Track Codex quota usage in onWatch (`v2.11.12`).
 
 ---
 
+## Browser device authentication in this fork
+
+This fork completes the OAuth token exchange before reporting a
+successful browser device login. Earlier fork builds treated the authorization
+code response as tokens, which could save an empty profile while displaying
+success. The corrected flow saves access and refresh tokens with the account
+identity. Failed or incomplete authorization leaves an existing profile intact.
+
+After installing the fix, repeat device authentication for an affected profile.
+Use a dedicated session for a remote monitor rather than repeatedly copying an
+active workstation session. A copied refresh token can be consumed by another
+client, and retrying cannot restore a revoked token. The container must also be
+able to write the profile directory, because refreshed tokens are saved through
+a temporary file and rename. Read-only profile access cannot preserve rotation.
+
 ## Prerequisites
 
 - Codex account access with a valid OAuth auth state

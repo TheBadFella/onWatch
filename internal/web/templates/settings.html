@@ -80,6 +80,34 @@
                         <span class="settings-field-hint">Comma-separated email addresses</span>
                     </div>
                 </div>
+                <h4 class="settings-subsection-title">Email Events</h4>
+                <div class="settings-fields">
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-warning" checked>
+                        <span>Warning alerts</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-critical" checked>
+                        <span>Critical alerts</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-reset" checked>
+                        <span>Reset notifications</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-auth-error" checked>
+                        <span>Auth error alerts</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-starter-success">
+                        <span>Quota-starter success (Codex auto quota-starter)</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-starter-failure">
+                        <span>Quota-starter failure</span>
+                    </label>
+                </div>
+                <p class="settings-section-desc">Choose which enabled notifications reach your inbox. Global notification switches still apply. Test emails always send.</p>
                 <div class="settings-actions">
                     <button class="settings-test-btn" id="smtp-test-btn" type="button">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
