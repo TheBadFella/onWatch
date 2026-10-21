@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
 )
@@ -98,7 +99,20 @@ func (h *Handler) CodexDeviceAuthPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(req.ProfileName)
+	// Clean invisible characters, control runes, and unicode whitespace
+	name := strings.TrimFunc(req.ProfileName, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || r == '\u200B' || r == '\u200C' || r == '\u200D' || r == '\uFEFF'
+	})
+	// Automatically normalize internal spaces to hyphens
+	name = strings.ReplaceAll(name, " ", "-")
+	// Retain only characters matching [a-zA-Z0-9_-]
+	name = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			return r
+		}
+		return -1
+	}, name)
+
 	if name == "" {
 		respondError(w, http.StatusBadRequest, "profile_name is required")
 		return
@@ -146,7 +160,11 @@ func (h *Handler) CodexDeviceAuthPoll(w http.ResponseWriter, r *http.Request) {
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(respBytes, &errData)
-		if errData.Error.Code == "deviceauth_authorization_pending" || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+		if errData.Error.Code == "deviceauth_authorization_pending" ||
+			errData.Error.Code == "authorization_pending" ||
+			errData.Error.Code == "slow_down" ||
+			resp.StatusCode == http.StatusForbidden ||
+			resp.StatusCode == http.StatusNotFound {
 			respondJSON(w, http.StatusOK, map[string]interface{}{
 				"status": "pending",
 			})
