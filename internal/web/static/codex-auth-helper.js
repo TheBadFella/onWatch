@@ -15,6 +15,16 @@
     return fetch(url, { ...opts, headers });
   }
 
+  // Sanitizes a profile name: removes invisible characters and spaces, converts internal spaces to hyphens
+  function sanitizeProfileName(val) {
+    if (!val) return '';
+    return val
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-zA-Z0-9_-]/g, '');
+  }
+
   // Periodically check if the Codex settings modal is active
   setInterval(() => {
     const listEl = document.getElementById('codex-profiles-list');
@@ -66,7 +76,7 @@
 
       <div style="padding:20px;">
         <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;">Profile Name</label>
-        <input type="text" id="codex-auth-name-input" placeholder="e.g. badfellaxai" style="width:100%;box-sizing:border-box;padding:8px 12px;border-radius:6px;border:1px solid var(--border,#334155);background:var(--surface-inset,#0f172a);color:var(--text,#f8fafc);font-size:14px;margin-bottom:16px;">
+        <input type="text" id="codex-auth-name-input" placeholder="e.g. badfellaxai" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width:100%;box-sizing:border-box;padding:8px 12px;border-radius:6px;border:1px solid var(--border,#334155);background:var(--surface-inset,#0f172a);color:var(--text,#f8fafc);font-size:14px;margin-bottom:16px;">
 
         <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border,#334155);padding-bottom:8px;">
           <button id="codex-tab-device" style="background:none;border:none;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;color:var(--primary,#0d9488);border-bottom:2px solid var(--primary,#0d9488);">Device Login (Direct)</button>
@@ -92,14 +102,23 @@
             </a>
 
             <div style="font-size:12px;color:var(--text-secondary,#94a3b8);margin-bottom:6px;">2. Enter one-time code</div>
-            <div id="codex-device-code-display" style="font-size:24px;font-weight:700;font-family:monospace;letter-spacing:2px;color:#38bdf8;padding:8px;background:var(--surface-inset,#0f172a);border-radius:6px;border:1px dashed var(--border,#334155);margin-bottom:16px;">
-              ----
+            <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:16px;">
+              <div id="codex-device-code-display" style="font-size:24px;font-weight:700;font-family:monospace;letter-spacing:2px;color:#38bdf8;padding:8px 16px;background:var(--surface-inset,#0f172a);border-radius:6px;border:1px dashed var(--border,#334155);">
+                ----
+              </div>
+              <button id="codex-device-copy-btn" type="button" class="btn" style="padding:8px 12px;font-size:12px;border-radius:6px;cursor:pointer;background:var(--surface-inset,#0f172a);border:1px solid var(--border,#334155);color:var(--text,#f8fafc);">
+                Copy
+              </button>
             </div>
 
-            <div style="font-size:12px;color:var(--text-secondary,#94a3b8);display:flex;align-items:center;justify-content:center;gap:8px;">
+            <div id="codex-device-waiting-indicator" style="font-size:12px;color:var(--text-secondary,#94a3b8);display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:12px;">
               <span class="spinner" style="display:inline-block;width:12px;height:12px;border:2px solid var(--border,#334155);border-top-color:var(--primary,#0d9488);border-radius:50%;animation:spin 1s linear infinite;"></span>
-              Waiting for browser authorization...
+              <span>Waiting for browser authorization...</span>
             </div>
+
+            <button id="codex-device-check-btn" type="button" class="btn" style="font-size:12px;padding:6px 14px;border-radius:6px;cursor:pointer;background:var(--surface-inset,#0f172a);border:1px solid var(--border,#334155);color:var(--text,#f8fafc);">
+              Check Status Now
+            </button>
           </div>
         </div>
 
@@ -122,6 +141,18 @@
     document.body.appendChild(overlay);
 
     let activePollInterval = null;
+
+    // Real-time input cleaner on profile name
+    const nameInput = document.getElementById('codex-auth-name-input');
+    nameInput.addEventListener('input', () => {
+      const cleaned = nameInput.value
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9_-]/g, '');
+      if (nameInput.value !== cleaned) {
+        nameInput.value = cleaned;
+      }
+    });
 
     // Close logic
     const closeModal = () => {
@@ -166,12 +197,18 @@
 
     // Device Auth Flow
     document.getElementById('codex-device-start-btn').onclick = async () => {
-      const name = document.getElementById('codex-auth-name-input').value.trim();
+      const name = sanitizeProfileName(nameInput.value);
+      nameInput.value = name;
       if (!name) {
-        showStatus('Please specify a profile name first', true);
+        showStatus('Please specify a profile name first (letters, numbers, hyphens, and underscores only)', true);
+        return;
+      }
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        showStatus('Profile name can only contain letters, numbers, hyphens, and underscores', true);
         return;
       }
 
+      nameInput.readOnly = true;
       showStatus('Connecting to OpenAI device auth...');
       try {
         const res = await authFetchOrFetch(`${API_BASE}/api/codex/device-auth/start`, { method: 'POST' });
@@ -183,8 +220,25 @@
         waitSection.style.display = 'block';
         document.getElementById('codex-device-code-display').textContent = data.user_code;
 
-        // Start background polling
-        activePollInterval = setInterval(async () => {
+        // Copy button setup
+        const copyBtn = document.getElementById('codex-device-copy-btn');
+        if (copyBtn) {
+          copyBtn.onclick = () => {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(data.user_code).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+              }).catch(() => {
+                copyBtn.textContent = 'Copied!';
+              });
+            } else {
+              copyBtn.textContent = 'Copied!';
+            }
+          };
+        }
+
+        // Single check function
+        const checkAuth = async (isManual = false) => {
           try {
             const pollRes = await authFetchOrFetch(`${API_BASE}/api/codex/device-auth/poll`, {
               method: 'POST',
@@ -197,7 +251,7 @@
             });
             const pollData = await pollRes.json();
             if (pollData.status === 'success') {
-              clearInterval(activePollInterval);
+              if (activePollInterval) clearInterval(activePollInterval);
               showStatus('Account successfully authorized and saved!');
               setTimeout(() => {
                 closeModal();
@@ -207,25 +261,56 @@
                   location.reload();
                 }
               }, 1200);
-            } else if (pollData.status !== 'pending') {
-              clearInterval(activePollInterval);
-              showStatus(pollData.error || 'Authorization failed', true);
+              return true;
+            } else if (pollData.status === 'pending') {
+              if (isManual) {
+                showStatus('Still waiting for approval at OpenAI. Make sure you entered code ' + data.user_code + ' and clicked Allow.', false);
+              }
+              return false;
+            } else {
+              const errMsg = pollData.error || 'Authorization pending or failed';
+              showStatus(errMsg, true);
+              if (errMsg.includes('expired') || errMsg.includes('denied')) {
+                if (activePollInterval) clearInterval(activePollInterval);
+              }
+              return false;
             }
           } catch (e) {
-            // Ignore transient network errors during poll
+            if (isManual) {
+              showStatus('Error checking authorization status: ' + e.message, true);
+            }
+            return false;
           }
-        }, 3500);
+        };
+
+        // Manual check button
+        const checkBtn = document.getElementById('codex-device-check-btn');
+        if (checkBtn) {
+          checkBtn.onclick = () => {
+            showStatus('Checking authorization status...');
+            checkAuth(true);
+          };
+        }
+
+        // Start background polling
+        activePollInterval = setInterval(() => checkAuth(false), 3500);
       } catch (err) {
+        nameInput.readOnly = false;
         showStatus('Failed to start device login: ' + err.message, true);
       }
     };
 
     // Paste JSON Flow
     document.getElementById('codex-paste-save-btn').onclick = async () => {
-      const name = document.getElementById('codex-auth-name-input').value.trim();
+      const name = sanitizeProfileName(nameInput.value);
+      nameInput.value = name;
       const authData = document.getElementById('codex-paste-textarea').value.trim();
       if (!name) {
-        showStatus('Please specify a profile name', true);
+        showStatus('Please specify a profile name (letters, numbers, hyphens, and underscores only)', true);
+        return;
+      }
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        showStatus('Profile name can only contain letters, numbers, hyphens, and underscores', true);
         return;
       }
       if (!authData) {
