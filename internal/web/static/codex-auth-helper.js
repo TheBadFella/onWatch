@@ -5,6 +5,16 @@
 (() => {
   const API_BASE = document.querySelector('meta[name="base-path"]')?.getAttribute('content') || '';
 
+  // Use authFetch if available (injected by app.js), otherwise plain fetch
+  // with the CSRF header that onWatch requires for state-changing requests.
+  function authFetchOrFetch(url, opts) {
+    if (typeof authFetch === 'function') {
+      return authFetch(url, opts);
+    }
+    const headers = { 'X-Requested-With': 'XMLHttpRequest', ...(opts?.headers || {}) };
+    return fetch(url, { ...opts, headers });
+  }
+
   // Periodically check if the Codex settings modal is active
   setInterval(() => {
     const listEl = document.getElementById('codex-profiles-list');
@@ -164,7 +174,7 @@
 
       showStatus('Connecting to OpenAI device auth...');
       try {
-        const res = await fetch(`${API_BASE}/api/codex/device-auth/start`, { method: 'POST' });
+        const res = await authFetchOrFetch(`${API_BASE}/api/codex/device-auth/start`, { method: 'POST' });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
 
@@ -176,7 +186,7 @@
         // Start background polling
         activePollInterval = setInterval(async () => {
           try {
-            const pollRes = await fetch(`${API_BASE}/api/codex/device-auth/poll`, {
+            const pollRes = await authFetchOrFetch(`${API_BASE}/api/codex/device-auth/poll`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -225,7 +235,7 @@
 
       showStatus('Saving profile...');
       try {
-        const res = await fetch(`${API_BASE}/api/codex/profiles`, {
+        const res = await authFetchOrFetch(`${API_BASE}/api/codex/profiles`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, auth_data: authData }),
