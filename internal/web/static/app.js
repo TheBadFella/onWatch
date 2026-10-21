@@ -2,7 +2,7 @@
 
 const BASE_PATH = (document.querySelector('meta[name="base-path"]') || {}).content || '';
 const API_BASE = BASE_PATH;
-const REFRESH_INTERVAL = 120000;
+const REFRESH_INTERVAL = 5000;
 
 // ── Lazy Loading via IntersectionObserver ──
 const _lazyLoaded = new Set();
@@ -4692,7 +4692,7 @@ function updateCommandCodeCard(quota) {
   }
 }
 
-async function fetchCurrent() {
+async function fetchCurrent(onlyIfChanged = false) {
   const requestProvider = getCurrentProvider();
   const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
   const requestSeq = (State.currentRequestSeq || 0) + 1;
@@ -4700,7 +4700,7 @@ async function fetchCurrent() {
 
   syncAccountsOverviewLayout();
   if (isAccountsOverviewMode(requestProvider)) {
-    await fetchAccountsOverview(requestProvider, requestSeq);
+    await fetchAccountsOverview(requestProvider, requestSeq, onlyIfChanged);
     return;
   }
 
@@ -4716,6 +4716,8 @@ async function fetchCurrent() {
       requestAnimationFrame(() => {
         if (State.currentRequestSeq !== requestSeq) return;
         if (getCurrentProvider() !== requestProvider) return;
+        document.getElementById('status-dot')?.classList.remove('stale');
+        if (!shouldRenderLiveData('api-integrations', {currentData, healthData}, !onlyIfChanged)) return;
         State.apiIntegrationsCurrent = currentData;
         State.apiIntegrationsHealth = healthData;
         renderAPIIntegrationsCards();
@@ -4753,6 +4755,8 @@ async function fetchCurrent() {
       if (getCurrentProvider() !== requestProvider) return;
       if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
 
+      document.getElementById('status-dot')?.classList.remove('stale');
+      if (!shouldRenderLiveData(`${requestProvider}:${requestAccount}`, {data, apiIntegrationsCurrentData, apiIntegrationsHealthData}, !onlyIfChanged)) return;
       const provider = requestProvider;
       if (provider === 'both') {
         if (apiIntegrationsCurrentData || apiIntegrationsHealthData) {
@@ -5119,7 +5123,7 @@ function renderAccountsOverview(provider, accounts) {
 }
 
 // Fetch all accounts for a provider and render the overview cards.
-async function fetchAccountsOverview(provider, requestSeq) {
+async function fetchAccountsOverview(provider, requestSeq, onlyIfChanged = false) {
   const endpoint = provider === 'minimax'
     ? `${API_BASE}/api/minimax/accounts/usage`
     : `${API_BASE}/api/codex/accounts/usage`;
@@ -5133,6 +5137,8 @@ async function fetchAccountsOverview(provider, requestSeq) {
       if (State.currentRequestSeq !== requestSeq) return;
       if (getCurrentProvider() !== provider) return;
       if (!isAccountsOverviewMode(provider)) return;
+      document.getElementById('status-dot')?.classList.remove('stale');
+      if (!shouldRenderLiveData(`${provider}:accounts`, accounts, !onlyIfChanged)) return;
       State.accountsOverview = { provider, accounts };
       renderAccountsOverview(provider, accounts);
       setLastUpdated();
@@ -10016,14 +10022,31 @@ function setupCardModals() {
 
 function startAutoRefresh() {
   if (State.refreshInterval) clearInterval(State.refreshInterval);
-  State.refreshInterval = setInterval(() => {
-    // Always refresh above-fold data
-    fetchCurrent(); fetchDeepInsights(); fetchHistory();
-    // Only refresh below-fold sections that have been loaded
-    if (shouldShowCyclesTable() && _lazyLoaded.has('.cycles-section')) fetchCycles();
-    if (shouldShowOverviewTable() && _lazyLoaded.has('.cycle-overview-section')) fetchCycleOverview();
-    if (shouldShowSessionsTable() && _lazyLoaded.has('.sessions-section')) fetchSessions();
-  }, REFRESH_INTERVAL);
+  if (State.autoRefreshVisibilityHandler) {
+    document.removeEventListener('visibilitychange', State.autoRefreshVisibilityHandler);
+  }
+  let refreshing = false;
+  let lastHistoryRefresh = Date.now();
+  const refresh = async () => {
+    if (document.hidden || refreshing) return;
+    refreshing = true;
+    try {
+      const requests = [fetchCurrent(true)];
+      if (Date.now() - lastHistoryRefresh >= 60000) {
+        lastHistoryRefresh = Date.now();
+        requests.push(fetchDeepInsights(), fetchHistory());
+        if (shouldShowCyclesTable() && _lazyLoaded.has('.cycles-section')) requests.push(fetchCycles());
+        if (shouldShowOverviewTable() && _lazyLoaded.has('.cycle-overview-section')) requests.push(fetchCycleOverview());
+        if (shouldShowSessionsTable() && _lazyLoaded.has('.sessions-section')) requests.push(fetchSessions());
+      }
+      await Promise.allSettled(requests);
+    } finally {
+      refreshing = false;
+    }
+  };
+  State.refreshInterval = setInterval(refresh, REFRESH_INTERVAL);
+  State.autoRefreshVisibilityHandler = () => document.hidden ? undefined : refresh();
+  document.addEventListener('visibilitychange', State.autoRefreshVisibilityHandler);
 }
 
 // ── Pagination Helper ──

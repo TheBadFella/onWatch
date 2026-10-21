@@ -88,3 +88,13 @@ function setupSidebar() {
 }
 
 document.addEventListener('DOMContentLoaded', setupSidebar);
+
+// Reuse the existing renderers when provider data changes, without redrawing
+// charts merely because the server's reset countdown is a few seconds lower.
+const liveDataSignatures = new Map();
+function shouldRenderLiveData(key, data, force = false) {
+  const signature = JSON.stringify(data, (name, value) => name === 'timeUntilResetSeconds' ? undefined : value);
+  const unchanged = liveDataSignatures.get(key) === signature;
+  liveDataSignatures.set(key, signature);
+  return force || !unchanged;
+}

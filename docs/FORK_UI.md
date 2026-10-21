@@ -24,6 +24,22 @@ provider poll must confirm the new quota cycle. Unknown reset times remain
 explicitly unavailable. Available capacity uses reported utilization, regardless
 of the chosen usage/available display mode. No cost estimates are inferred.
 
+## Live usage updates
+
+Visible dashboards check OnWatch's stored usage every five seconds. Provider
+requests remain in the background agent; opening extra tabs does not multiply
+those requests. History, insights, and visible tables refresh once per minute.
+Hidden tabs pause automatic data refresh and catch up when visible again. Slow
+requests do not overlap. Unchanged snapshots keep existing cards and charts;
+countdowns continue locally. Manual refresh still forces a render.
+
+This server uses `ONWATCH_POLL_INTERVAL: 60` in its OnWatch Compose environment,
+so enabled providers are polled about once per minute. Other deployments can set
+that same non-secret option and recreate OnWatch to apply it. Existing disabled
+pollers, authentication pauses, and provider retry/backoff behavior still apply.
+Provider-side reporting can lag; this is near-real-time monitoring, not a stream
+of individual prompts or token events.
+
 ## Fast Linux image delivery
 
 Pushes to `main` publish the Linux AMD64 Alpine image through **Sync Upstream &
