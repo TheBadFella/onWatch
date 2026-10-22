@@ -11,7 +11,7 @@ function fixture() {
   const timers=new Map(), listeners=new Map();
   const doc={hidden:false,addEventListener:(event,fn)=>listeners.set(event,fn),removeEventListener:(event,fn)=>{if(listeners.get(event)===fn)listeners.delete(event);}};
   const context=vm.createContext({
-    document:doc, State:{}, Date:{now:()=>now}, REFRESH_INTERVAL:Number(app.match(/const REFRESH_INTERVAL = (\d+)/)[1]),
+    document:doc, window:{}, refreshResetChipTips(){}, State:{}, Date:{now:()=>now}, REFRESH_INTERVAL:Number(app.match(/const REFRESH_INTERVAL = (\d+)/)[1]),
     setInterval:(fn,ms)=>{timers.set(++sequence,{fn,ms});return sequence;},clearInterval:id=>timers.delete(id),
     fetchCurrent:async live=>{calls.current++; assert.equal(live,true);},
     fetchHistory:async()=>{calls.history++;},fetchDeepInsights:async()=>{calls.insights++;},
@@ -42,7 +42,7 @@ test('slow requests do not overlap and failures do not stop later refreshes',asy
 });
 test('reinitialization replaces the old timer and visibility listener',()=>{
   const f=fixture();const original=f.listeners.get('visibilitychange');f.context.startAutoRefresh();
-  assert.equal(f.timers.size,1);assert.equal(f.listeners.size,1);assert.notEqual(f.listeners.get('visibilitychange'),original);
+  assert.equal(f.timers.size,2);assert.equal(f.listeners.size,1);assert.notEqual(f.listeners.get('visibilitychange'),original);
 });
 
 test('unchanged snapshots avoid chart redraws while new snapshots and manual refreshes still render',()=>{
