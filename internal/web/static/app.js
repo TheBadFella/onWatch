@@ -4795,6 +4795,7 @@ async function fetchCurrent(onlyIfChanged = false) {
             renderAnthropicQuotaCards(data.quotas, 'quota-grid-anthropic');
           }
           data.quotas.forEach(q => updateAnthropicCard(q));
+          if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
           // Store quota names for session table headers using Anthropic display order.
           if (State.anthropicSessionQuotas.length === 0) {
             State.anthropicSessionQuotas = sortQuotaKeysForProvider(data.quotas.map(q => q.name), 'anthropic').slice(0, 3);
@@ -5015,6 +5016,7 @@ async function fetchCodexUsage(options = {}) {
     }
 
     visibleQuotas.forEach(q => updateCodexCard(q));
+    if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
     // Ensure the Auto-start badge matches settings even when cards were rendered
     // before provider settings loaded (only in-place value updates run after).
     syncCodexAutoStartBadges();
@@ -5107,6 +5109,7 @@ function accountOverviewCardHTML(provider, account, idx) {
     ${provider === 'codex' ? codexResetSummaryHTML(account.resetCredits) : ''}
     ${provider === 'codex' ? codexUsageSourceNoteHTML(account.usageSourceNote) : ''}
     <div class="account-overview-quotas">${quotaHTML}</div>
+    <div class="account-cost-slot" data-cost-provider="${provider}" data-cost-account-id="${accountId}">${typeof costAccountHTML === 'function' ? costAccountHTML(provider,accountId) : ''}</div>
     <div class="account-overview-actions"><button type="button" class="account-overview-cta" aria-label="Open ${escapeHTML(accountName)} details">View details &rarr;</button>
     ${provider === 'codex' && (account.paused || account.authRequired) ? `<button type="button" class="connect-primary" data-codex-connect data-profile-name="${escapeHTML(accountName)}">Reconnect</button>` : ''}</div>
   </article>`;
@@ -5129,10 +5132,11 @@ function renderAccountsOverview(provider, accounts) {
     const template = document.createElement('template');
     template.innerHTML = html;
     [...template.content.children].forEach((card, idx) => patchOverviewNode(existing[idx], card));
+    if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
     return;
   }
   container.innerHTML = html;
-
+  if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
   const drill = (accountId) => {
     if (provider === 'minimax') switchMiniMaxAccount(accountId);
     else switchCodexProfile(accountId);
@@ -7232,6 +7236,7 @@ function buildAllProviderEntries() {
           title: `Codex - Account: ${accountName}`,
           badge: account.planLabel || account.planType ? formatCodexPlan(account.planType, account.planLabel) : '',
           planType: account.planType || '',
+          accountId: accountID,
           usageSourceNote: account.usageSourceNote || '',
           quotas: normalizeBothQuotas('codex', account),
           insights: insightPayload,
@@ -8014,6 +8019,7 @@ function renderAllProvidersView() {
       <div class="provider-card-body">
         ${entry.provider === 'codex' ? codexUsageSourceNoteHTML(entry.usageSourceNote) : ''}
         <div class="provider-kpis">${renderProviderKPIHTML(entry.quotas, entry.provider)}</div>
+        ${entry.provider === 'codex' || entry.provider === 'anthropic' ? `<div class="account-cost-slot" data-cost-provider="${entry.provider}" data-cost-account-id="${entry.accountId || ''}">${typeof costAccountHTML === 'function' ? costAccountHTML(entry.provider,entry.accountId || null) : ''}</div>` : ''}
         ${entry.provider === "mistral" && entry.showBilling ? `<p>Pay-as-you-go: ${escapeHTML(mistralMoney(entry.billing?.amount,entry.billing?.currency))}</p>` : ""}
         ${(() => {
           const insightsHTML = renderProviderInsightsHTML(entry.provider, entry.insights);
@@ -8024,6 +8030,7 @@ function renderAllProvidersView() {
     </section>`;
   }).join('');
 
+  if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
   // Grouped multi-account cards in the All view navigate to the provider tab,
   // pinning the clicked account as the active selection.
   container.querySelectorAll('.accounts-overview-grid .account-overview-card').forEach((card) => {

@@ -58,49 +58,76 @@ function collectCostSettings() {
  }
  return result;
 }
-function costDashboardHTML(data) {
- const money=(value,currency='USD')=>new Intl.NumberFormat(undefined,{style:'currency',currency,currencyDisplay:'code',maximumFractionDigits:4}).format(value);
- const range=(value,max,currency)=>money(value,currency)+(max!==null && max!==undefined && max>value?'–'+money(max,currency):'');
- const dual=(usd,cad,maxUSD,maxCAD)=>cad!==null && cad!==undefined?`${range(cad,maxCAD,'CAD')}<small>${range(usd,maxUSD,'USD')}</small>`:range(usd,maxUSD,'USD');
- const scaled=(value,plan)=>plan.monthly_max_usd && plan.monthly_usd>0?value*plan.monthly_max_usd/plan.monthly_usd:undefined;
- const date=value=>Number.isFinite(Date.parse(value))?costEscape(new Date(value).toISOString().slice(0,10)):'Unknown';
- const plans=data.subscriptions || [],values=data.subscription_values || [],usage=data.usage || [];
- const priced=usage.filter(row=>row.estimated_usd!==null && row.estimated_usd!==undefined);
- const estimated=priced.length?dual(data.estimated_api_usd,data.estimated_api_cad)+(data.unpriced_requests || data.truncated?' (partial)':''):'Not available';
- const rows=usage.map(row=>`<tr><td>${costEscape(row.provider)} / ${costEscape(row.account)}</td><td>${costEscape(row.model)}</td><td>${costEscape((row.input_tokens+row.output_tokens).toLocaleString())}</td><td>${row.estimated_usd!==null && row.estimated_usd!==undefined?money(row.estimated_usd):costEscape(row.reason || 'Not priced')}</td></tr>`).join('');
- const planRows=values.length?values.map(plan=>`<li><strong>${costEscape(plan.provider)} / ${costEscape(plan.account)}</strong>: ${dual(plan.monthly_usd,plan.monthly_cad,plan.monthly_max_usd,plan.monthly_max_cad)} per month. Daily allocation: ${dual(plan.daily_usd,plan.daily_cad,scaled(plan.daily_usd,plan),plan.daily_cad==null?undefined:scaled(plan.daily_cad,plan))}.<small>${costEscape(plan.price_source || 'Saved subscription fee')}. Allocation period: ${date(plan.cycle_start)} to ${date(plan.cycle_end)} UTC. CAD: ${costEscape(plan.cad_source || 'conversion unavailable')}.</small></li>`).join('')
- : plans.map(plan=>`<li>${costEscape(plan.provider)} / ${costEscape(plan.account)}: ${money(plan.monthly_usd)} per month</li>`).join('');
- const allocationRows=values.map(plan=>{
-  const name=costEscape(plan.provider)+' / '+costEscape(plan.account);
-  if(!plan.windows?.length)return `<tr><td>${name}</td><td colspan="3">${costEscape(plan.reason || 'Quota value unavailable')}</td></tr>`;
-  const allocation=(usd,cad)=>dual(usd,cad,scaled(usd,plan),cad==null?undefined:scaled(cad,plan));
-  return plan.windows.map(window=>`<tr><td>${name}<small>Observed: ${plan.observed_at?costEscape(new Date(plan.observed_at).toLocaleString()):'Not reported'}</small></td><td>${window.key==='five_hour'?'5-hour':'Weekly'}<small>${costEscape(window.used_percent.toFixed(1))}% used</small></td><td><span class="cost-mobile-label">Allocated fee used</span>${allocation(window.used_usd,window.used_cad)}</td><td><span class="cost-mobile-label">Allocation remaining</span>${allocation(window.remaining_usd,window.remaining_cad)}</td></tr>`).join('');
- }).join('');
- const incomplete=(data.unpriced_subscriptions || []).length>0;
- let html=`<h2>Subscription costs <span>Canada · CAD first · detected plans and current quota readings</span></h2><div class="cost-summary-grid"><div><span>Estimated monthly fees${incomplete?' (partial)':''}</span><strong>${plans.length?dual(data.subscription_monthly_usd,data.subscription_monthly_cad,data.subscription_monthly_max_usd,data.subscription_monthly_max_cad):'Not available'}</strong><small>Automatic list-price estimates; saved overrides take priority.</small></div><div><span>Annualized fee estimates${incomplete?' (partial)':''}</span><strong>${plans.length?dual(data.subscription_annual_usd ?? data.subscription_monthly_usd*12,data.subscription_annual_cad,data.subscription_annual_max_usd,data.subscription_annual_max_cad):'Not available'}</strong><small>12 months at the current reference price and conversion rate.</small></div></div>`;
- html+='<p>Plan prices checked '+costEscape(data.price_catalog_date || '2026-10-22')+'. Ranges cover unreported billing or seat tiers. CAD conversions are estimates, not Canadian checkout prices. Taxes and discounts are not inferred.</p>';
- if(incomplete)html+='<ul>'+data.unpriced_subscriptions.map(plan=>`<li>${costEscape(plan.provider)} / ${costEscape(plan.account)}: ${costEscape(plan.source)}. Excluded from totals.</li>`).join('')+'</ul>';
- if(data.exchange){const fx=data.exchange;html+=`<p>CAD per USD: ${costEscape(fx.cad_per_usd)} · ${costEscape(fx.source)}${fx.date?' · '+costEscape(fx.date):''}${fx.stale?' · older cached rate':''}. Actual CAD fees override conversion.</p>`;}
- else if(plans.length && data.subscription_monthly_cad===undefined)html+='<p>CAD conversion is unavailable. Enter the CAD amount you pay or a CAD-per-USD rate in Settings.</p>';
- if(planRows)html+='<details><summary>Subscription breakdown</summary><ul>'+planRows+'</ul></details>';
- if(allocationRows)html+=`<details class="cost-quota-values" open><summary>Quota value estimates</summary><p>Planning allocation of the subscription fee: monthly fee × window duration ÷ billing-period duration × quota used. Five-hour and weekly limits overlap. Do not add their values. This is not API token spend or an additional charge.</p><div class="cost-table-scroll"><table class="cost-quota-table"><thead><tr><th>Account</th><th>Window</th><th>Allocated fee used</th><th>Allocation remaining</th></tr></thead><tbody>${allocationRows}</tbody></table></div></details>`;
- html+=`<details><summary>Advanced: API-equivalent token cost</summary><p>${estimated}</p>`
- +(rows?`<div class="cost-table-scroll"><table><thead><tr><th>Account</th><th>Model</th><th>Tokens</th><th>Estimated USD</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p>No token telemetry received this month. This does not prevent subscription and quota-value calculations.</p>')
- +(data.unpriced_requests?`<p>${costEscape(data.unpriced_requests)} requests could not be priced. Add matching model rates and provide cache counts in telemetry.</p>`:'')
- +(data.truncated?'<p>Only the first 500 account/model groups are shown. Token totals are partial.</p>':'')+'</details>'
- +`<a href="${typeof BASE_PATH==='string'?BASE_PATH:''}/settings">Optional price overrides in General → Costs</a>`;
- return html;
+let costData = null;
+function costMoney(value, currency='CAD') {
+ return Number.isFinite(value)?new Intl.NumberFormat('en-CA',{style:'currency',currency,currencyDisplay:'code',maximumFractionDigits:2}).format(value):'Unavailable';
+}
+function costScope(data, provider='both', accountID=null) {
+ const matches=plan=>(provider==='both' || costProviderKey(plan.provider)===costProviderKey(provider)) && (accountID===null || accountID==='all' || String(plan.account_id)===String(accountID));
+ return {plans:(data.subscription_values || []).filter(matches),unknown:(data.unpriced_subscriptions || []).filter(matches)};
+}
+function costAmount(usd,cad,approximate=false) {
+ return `<strong>${approximate?'≈ ':''}${costMoney(cad ?? usd,cad==null?'USD':'CAD')}</strong>`;
+}
+function costAccountSection(plan) {
+ const week=plan.weekly;
+ return `<section class="account-cost" aria-label="${costEscape(plan.account)} cost"><h3>Cost</h3><div class="cost-metrics"><div title="${costEscape(plan.price_source || 'Plan reference price')}"><span>Monthly plan</span>${costAmount(plan.monthly_usd,plan.monthly_cad)}<small>${costMoney(plan.monthly_usd,'USD')}/mo</small></div><div title="Subscription value based on weekly quota usage. This is not an extra charge."><span>Used this week <span aria-hidden="true">ⓘ</span></span>${week?costAmount(week.used_usd,week.used_cad,true):'<strong>Unavailable</strong>'}<small>${week?`${week.used_percent.toFixed(1)}% of weekly quota`:costEscape(plan.reason?'Waiting for fresh usage':'No weekly usage reported')}</small></div></div></section>`;
+}
+function costAccountHTML(provider,accountID) {
+ if(!costData)return '';
+ const {plans,unknown}=costScope(costData,provider,accountID);
+ if(plans[0])return costAccountSection(plans[0]);
+ return unknown.length?'<section class="account-cost"><h3>Cost</h3><span>Plan price unavailable</span></section>':'';
+}
+function costTokenHTML(data,provider,accounts,accountID) {
+ const names=new Set(accounts.map(plan=>costProviderKey(plan.provider)+'|'+plan.account));
+ const usage=(data.usage || []).filter(row=>(provider==='both' || costProviderKey(row.provider)===costProviderKey(provider)) && (accountID===null || accountID==='all' || names.has(costProviderKey(row.provider)+'|'+row.account)));
+ if(!usage.length)return '';
+ const priced=usage.filter(row=>row.estimated_usd!=null);
+ return `<details class="cost-token-details"><summary>API token value</summary><p>${priced.length?costMoney(priced.reduce((sum,row)=>sum+row.estimated_usd,0),'USD'):'Unavailable'}${priced.length!==usage.length?' (partial)':''}</p><small>From received token telemetry, separate from subscription fees.</small></details>`;
+}
+function costDashboardHTML(data,provider='both',accountID=null) {
+ const {plans,unknown}=costScope(data,provider,accountID);
+ const tokens=costTokenHTML(data,provider,[...plans,...unknown],accountID);
+ if(!plans.length && !unknown.length)return tokens;
+ if(accountID!==null && accountID!=='all')return (plans[0]?costAccountSection(plans[0]):'<h2>Cost</h2><p>Plan price unavailable</p>')+tokens;
+ const usd=plans.reduce((sum,plan)=>sum+plan.monthly_usd,0);
+ const cad=plans.length && plans.every(plan=>plan.monthly_cad!=null)?plans.reduce((sum,plan)=>sum+plan.monthly_cad,0):null;
+ const reporting=plans.filter(plan=>plan.weekly);
+ const usedUSD=reporting.reduce((sum,plan)=>sum+plan.weekly.used_usd,0);
+ const usedCAD=reporting.length && reporting.every(plan=>plan.weekly.used_cad!=null)?reporting.reduce((sum,plan)=>sum+plan.weekly.used_cad,0):null;
+ const count=plans.length+unknown.length;
+ let html=`<h2>Cost <span>${count} account${count===1?'':'s'}</span></h2><div class="cost-metrics"><div><span>Monthly total${unknown.length?' (partial)':''}</span>${plans.length?costAmount(usd,cad):'<strong>Unavailable</strong>'}<small>${plans.length?costMoney(usd,'USD')+'/mo':'Plan price unavailable'}</small></div><div title="Combined weekly subscription value used. This is not an extra charge."><span>Used this week <span aria-hidden="true">ⓘ</span></span>${reporting.length?costAmount(usedUSD,usedCAD,true):'<strong>Unavailable</strong>'}<small>${reporting.length} of ${count} accounts reporting</small></div></div>`;
+ return html+tokens;
+}
+function paintCosts() {
+ if(!costData)return;
+ const provider=typeof getCurrentProvider==='function'?getCurrentProvider():'both';
+ const accountID=provider==='codex' && typeof State!=='undefined'?State.codexAccount:null;
+ const panel=document.getElementById('cost-dashboard');
+ if(panel){
+  const html=costDashboardHTML(costData,provider,accountID);
+  panel.hidden=!html;
+  if(panel.innerHTML!==html)panel.innerHTML=html;
+ }
+ document.querySelectorAll('.account-cost-slot').forEach(slot=>{
+  const html=costAccountHTML(slot.dataset.costProvider,slot.dataset.costAccountId || null);
+  if(slot.innerHTML!==html)slot.innerHTML=html;
+ });
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('cost-add-subscription')?.addEventListener('click',()=>addCostRow('subscription'));
  document.getElementById('cost-add-rate')?.addEventListener('click',()=>addCostRow('rate'));
- const panel=document.getElementById('cost-dashboard');if(!panel)return;
+ if(!document.getElementById('cost-dashboard'))return;
  let active=false;
  async function refresh(){
-  if(document.hidden || active)return;active=true;
-  try{const response=await authFetch('/api/costs');if(!response.ok)throw new Error('unavailable');const data=await response.json();const html=costDashboardHTML(data);if(panel.innerHTML!==html){const states=new Map([...panel.querySelectorAll('details')].map(el=>[el.querySelector('summary').textContent,el.open]));panel.innerHTML=html;panel.querySelectorAll('details').forEach(el=>{const key=el.querySelector('summary').textContent;if(states.has(key))el.open=states.get(key)})}}
-  catch(e){if(!panel.children.length)panel.textContent='Cost data is unavailable. Try refreshing.';}
+  paintCosts();
+  if(document.hidden || active)return;
+  active=true;
+  try{const response=await authFetch('/api/costs');if(!response.ok)throw new Error('unavailable');costData=await response.json();paintCosts();}
+  catch(e){/* Keep usage and last known subscription fees visible. */}
   finally{active=false;}
  }
+ window.OnWatchCosts={refresh,paint:paintCosts};
  refresh();setInterval(refresh,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 });

@@ -8,6 +8,7 @@ import "strings"
 type detectedCostSubscription struct {
 	Provider      string   `json:"provider"`
 	Account       string   `json:"account"`
+	AccountID     int64    `json:"account_id,omitempty"`
 	Plan          string   `json:"plan"`
 	MonthlyUSD    *float64 `json:"monthly_usd"`
 	MonthlyMaxUSD *float64 `json:"monthly_max_usd,omitempty"`
@@ -25,9 +26,9 @@ func codexSubscriptionPrice(plan string) (float64, float64, string, bool) {
 	case "promax":
 		return 500, 500, "Pro 500 monthly list price", true
 	case "pro":
-		return 100, 500, "Pro list-price range; billing tier is not reported", true
+		return 200, 200, "Pro monthly reference price", true
 	case "team", "business":
-		return 20, 125, "Business per-seat list-price range; billing frequency and Standard/Premium seat are not reported", true
+		return 20, 20, "Business Standard annual-plan reference price per seat", true
 	default:
 		return 0, 0, "No public price identified for this plan", false
 	}
@@ -46,7 +47,7 @@ func (h *Handler) detectedCostSubscriptions() []detectedCostSubscription {
 		if len(result) >= 100 {
 			break
 		}
-		item := detectedCostSubscription{Provider: "codex", Account: account.Name, Source: "Waiting for the provider to report a plan"}
+		item := detectedCostSubscription{Provider: "codex", Account: account.Name, AccountID: account.ID, Source: "Waiting for the provider to report a plan"}
 		if snapshot, err := h.store.QueryLatestCodex(account.ID); err == nil && snapshot != nil {
 			item.Plan = snapshot.PlanType
 			low, high, source, known := codexSubscriptionPrice(item.Plan)

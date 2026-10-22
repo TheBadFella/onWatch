@@ -1,21 +1,40 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');
 const source=fs.readFileSync('internal/web/static/costs.js','utf8');
 const context=vm.createContext({Intl,document:{addEventListener(){}}});vm.runInContext(source,context);
-test('cost view distinguishes absent data, free usage and partial estimates',()=>{
- const empty=context.costDashboardHTML({subscriptions:[],usage:[]});assert.match(empty,/Not available/);assert.match(empty,/No token telemetry/);
- const zero=context.costDashboardHTML({subscriptions:[],usage:[{provider:'openai',account:'a',model:'free',input_tokens:1,output_tokens:1,estimated_usd:0}],estimated_api_usd:0});assert.match(zero,/USD[^0-9]*0/);assert.doesNotMatch(zero.slice(zero.indexOf("Advanced: API-equivalent")),/Not available/);
- const partial=context.costDashboardHTML({subscriptions:[{provider:'openai',account:'<script>',monthly_usd:20}],subscription_monthly_usd:20,usage:[{provider:'openai',account:'a',model:'test',input_tokens:100,output_tokens:1,estimated_usd:1}],estimated_api_usd:1,unpriced_requests:4});assert.match(partial,/partial/);assert.match(partial,/4 requests/);assert.doesNotMatch(partial,/<script>/);assert.match(partial,/&lt;script&gt;/);
+const plan=(id,name,used)=>({provider:'codex',account_id:id,account:name,monthly_usd:20,monthly_cad:28.04,weekly:used===null?null:{used_percent:used,used_usd:20*12/52*used/100,used_cad:28.04*12/52*used/100}});
+const data={subscription_values:[plan(6,'personal',50),plan(9,'work',25)],usage:[]};
+test('two Plus accounts show a compact total without ranges or explanatory blocks',()=>{
+ const html=context.costDashboardHTML(data,'codex','all');
+ assert.match(html,/CAD[^0-9]*56\.08/);assert.match(html,/USD[^0-9]*40\.00\/mo/);assert.match(html,/2 accounts/);assert.match(html,/CAD[^0-9]*4\.85/);
+ assert.doesNotMatch(html,/range|annual|allocation|Canada|conversion|telemetry|Advanced|–/i);
 });
-
-test('subscription and quota values do not depend on token telemetry',()=>{
- const html=context.costDashboardHTML({subscriptions:[{provider:'codex',account:'personal',monthly_usd:20}],subscription_monthly_usd:20,subscription_monthly_cad:30,subscription_annual_usd:240,subscription_annual_cad:360,usage:[],subscription_values:[{provider:'codex',account:'personal',monthly_usd:20,monthly_cad:30,daily_usd:2/3,daily_cad:1,cycle_start:'2026-04-01T00:00:00Z',cycle_end:'2026-05-01T00:00:00Z',cad_source:'Entered CAD fee',windows:[{key:'seven_day',used_percent:50,used_usd:7/3,used_cad:3.5,remaining_usd:7/3,remaining_cad:3.5}]}]});
- assert.match(html,/CAD[^0-9]*30/);assert.match(html,/USD[^0-9]*240/);assert.match(html,/CAD[^0-9]*360/);assert.match(html,/CAD[^0-9]*3.50/);assert.match(html,/Do not add/);assert.match(html,/does not prevent subscription/);
+test('selecting an account scopes both the monthly fee and weekly value',()=>{
+ const html=context.costDashboardHTML(data,'codex',6);
+ assert.match(html,/personal cost/);assert.match(html,/CAD[^0-9]*28\.04/);assert.match(html,/CAD[^0-9]*3\.24/);assert.match(html,/50\.0% of weekly quota/);
+ assert.doesNotMatch(html,/work|56\.08|4\.85|25\.0%/);
+ const second=context.costDashboardHTML(data,'codex',9);assert.match(second,/25\.0% of weekly quota/);assert.match(second,/CAD[^0-9]*1\.62/);assert.doesNotMatch(second,/50\.0%/);
 });
-test('stale readings and old exchange rates remain explicit',()=>{
- const html=context.costDashboardHTML({subscriptions:[{provider:'codex',account:'a',monthly_usd:20}],subscription_monthly_usd:20,usage:[],exchange:{cad_per_usd:1.5,source:'Bank of Canada',date:'2026-10-20',stale:true},subscription_values:[{provider:'codex',account:'a',monthly_usd:20,daily_usd:1,windows:[],reason:'Quota reading is stale'}]});
- assert.match(html,/Quota reading is stale/);assert.match(html,/older cached rate/);assert.doesNotMatch(html,/undefined|NaN/);
+test('unknown or stale weekly usage remains unavailable while the fee stays visible',()=>{
+ const html=context.costDashboardHTML({subscription_values:[plan(6,'personal',null)]},'codex',6);
+ assert.match(html,/28\.04/);assert.match(html,/Unavailable/);assert.doesNotMatch(html,/0\.0%|CAD[^0-9]*0\.00/);
+ const unknown=context.costDashboardHTML({unpriced_subscriptions:[{provider:'codex',account_id:2,account:'custom'}]},'codex',2);
+ assert.match(unknown,/price unavailable/);assert.doesNotMatch(unknown,/0\.00/);
 });
-test('automatic prices show CAD first, ranges and unpriced accounts',()=>{
- const html=context.costDashboardHTML({subscriptions:[{provider:'codex',account:'work',monthly_usd:20}],subscription_monthly_usd:20,subscription_monthly_max_usd:125,subscription_monthly_cad:30,subscription_monthly_max_cad:187.5,subscription_annual_usd:240,subscription_annual_max_usd:1500,subscription_annual_cad:360,subscription_annual_max_cad:2250,usage:[],unpriced_subscriptions:[{provider:'codex',account:'custom',source:'No public price identified'}],subscription_values:[{provider:'codex',account:'work',monthly_usd:20,monthly_max_usd:125,monthly_cad:30,monthly_max_cad:187.5,daily_usd:1,daily_cad:1.5,windows:[{key:'seven_day',used_percent:50,used_usd:2,used_cad:3,remaining_usd:2,remaining_cad:3}]}]});
- assert.match(html,/CAD[^0-9]*30\.00–CAD[^0-9]*187\.50<small>USD/);assert.match(html,/partial/);assert.match(html,/No public price identified/);assert.match(html,/Excluded from totals/);assert.match(html,/not Canadian checkout prices/);assert.match(html,/CAD[^0-9]*3\.00–CAD[^0-9]*18\.75/);assert.doesNotMatch(html,/NaN|undefined/);
+test('missing accounts do not show a cost panel; known free plans preserve zero',()=>{
+ assert.equal(context.costDashboardHTML({subscription_values:[]}), '');
+ const free={...plan(1,'free',0),monthly_usd:0,monthly_cad:0,weekly:{used_percent:0,used_usd:0,used_cad:0}};
+ assert.match(context.costDashboardHTML({subscription_values:[free]},'codex',1),/CAD[^0-9]*0\.00/);
+});
+test('token estimates stay separate, preserve zero and respect account selection',()=>{
+ const api={...data,usage:[{provider:'openai',account:'personal',estimated_usd:0},{provider:'openai',account:'work',estimated_usd:3},{provider:'openai',account:'work',estimated_usd:null}]};
+ const personal=context.costDashboardHTML(api,'codex',6);assert.match(personal,/<details class="cost-token-details"><summary>API token value/);assert.match(personal,/<p>USD[^0-9]*0\.00<\/p>/);assert.doesNotMatch(personal,/partial/);
+ const work=context.costDashboardHTML(api,'codex',9);assert.match(work,/<p>USD[^0-9]*3\.00 \(partial\)/);
+});
+test('unpriced accounts mark totals partial and account labels are escaped',()=>{
+ const html=context.costDashboardHTML({...data,unpriced_subscriptions:[{provider:'codex',account:'custom'}]});assert.match(html,/Monthly total \(partial\)/);assert.match(html,/2 of 3 accounts reporting/);
+ const escaped=context.costDashboardHTML({subscription_values:[plan(1,'<script>',50)]},'codex',1);assert.doesNotMatch(escaped,/<script>/);assert.match(escaped,/&lt;script&gt;/);
+});
+test('cost comes after usage in the dashboard template and inside each account card',()=>{
+ const template=fs.readFileSync('internal/web/templates/dashboard.html','utf8');assert.ok(template.indexOf('id="cost-dashboard"')>template.indexOf('id="quota-grid-codex"'));assert.ok(template.indexOf('id="cost-dashboard"')>template.indexOf('id="all-providers-container"'));
+ const app=fs.readFileSync('internal/web/static/app.js','utf8');const start=app.indexOf('function accountOverviewCardHTML(');const card=app.slice(start,app.indexOf('// Build one compact, clickable summary card',start));assert.ok(card.indexOf('account-cost-slot')>card.indexOf('account-overview-quotas'));
 });

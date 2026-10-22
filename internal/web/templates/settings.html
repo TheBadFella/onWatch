@@ -467,7 +467,7 @@
             <details class="settings-section settings-disclosure" id="cost-settings">
                 <summary>Costs</summary>
                 <div class="settings-disclosure-body">
-                    <p class="settings-section-desc">Codex plans and public list-price estimates appear automatically. Canada is the default, with CAD shown first. If the provider does not report the billing or seat tier, estimates show a price range. CAD conversions are reference estimates, not Canadian checkout prices.</p>
+                    <p class="settings-section-desc">Codex plan prices fill in automatically. CAD is shown first, with the USD monthly price underneath. Price overrides are optional.</p>
                     <div id="cost-detected-plans"></div>
                     <div class="settings-fields">
                         <div class="settings-field">
@@ -482,7 +482,7 @@
                     <p class="settings-section-desc">Use a linked account name. Codex accounts are suggested automatically; the single Claude account is named default. The billing day uses UTC and defaults to the first of the month. Actual CAD fees include any conversion or card charges you choose to enter.</p>
                     <div id="cost-subscription-rows"></div>
                     <button type="button" class="settings-test-btn" id="cost-add-subscription">Add price override</button>
-                    <p class="settings-section-desc">Quota value is a planning allocation: monthly fee × window duration ÷ billing-period duration × used percentage. Five-hour and weekly limits overlap, so their values must not be added. This does not represent API token spend or an additional charge.</p>
+                    <p class="settings-section-desc">Used this week estimates the used share of your plan's weekly value. It is separate from your fixed subscription bill and from API token costs.</p>
                     <details class="cost-model-rates">
                     <summary>Advanced: API-equivalent model rates</summary>
                     <p class="settings-section-desc">Use the provider and exact model ID from API Integrations. Codex telemetry uses provider openai; Claude uses anthropic. Input token totals include cache hits. Missing cache counts leave requests unpriced when cached and regular rates differ. Save Settings applies these rates to all retained telemetry.</p>

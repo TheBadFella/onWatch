@@ -234,39 +234,26 @@
 .reset-history-details dd { margin: 0 0 6px; overflow-wrap: anywhere; }
 @media (max-width: 480px) { .reset-history-section { padding: 14px; } }
 
-.cost-dashboard { margin-bottom: 20px; padding: 16px; background: var(--surface-card); border: 1px solid var(--border-default); border-radius: var(--radius-lg); }
-.cost-dashboard:empty { display: none; }
-.cost-dashboard h2 { font-size: 16px; margin: 0 0 12px; }
-.cost-dashboard h2 span, .cost-dashboard p, .cost-dashboard small, .cost-dashboard a, .cost-dashboard summary, .cost-dashboard li { font-size: 12px; line-height: 1.6; }
-.cost-dashboard h2 span { display: block; color: var(--text-muted); font-weight: 400; }
-.cost-summary-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-bottom: 12px; }
-.cost-summary-grid span, .cost-summary-grid small { display: block; color: var(--text-muted); }
-.cost-summary-grid span { font-size: 12px; }
-.cost-summary-grid strong { display: block; font-size: 20px; margin: 6px 0; overflow-wrap: anywhere; }
-.cost-dashboard details { margin: 8px 0; }
-.cost-dashboard summary { cursor: pointer; }
-.cost-table-scroll { max-width: 100%; overflow-x: auto; }
-.cost-dashboard table { width: 100%; font-size: 12px; border-collapse: collapse; }
-.cost-dashboard td, .cost-dashboard th { padding: 8px; text-align: left; border-bottom: 1px solid var(--border-default); }
+.cost-dashboard { margin: 16px 0 20px; padding: 16px; background: var(--surface-card); border: 1px solid var(--border-default); border-radius: var(--radius-lg); }
+.cost-dashboard[hidden], .account-cost-slot:empty { display: none; }
+.cost-dashboard h2 { display: flex; align-items: center; justify-content: space-between; font-size: 14px; margin: 0 0 12px; }
+.cost-dashboard h2 span { color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.account-cost { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-default); }
+.account-cost h3 { font-size: 12px; color: var(--text-secondary); font-weight: 600; margin: 0 0 10px; }
+.cost-dashboard > .account-cost { margin: 0; padding: 0; border: 0; }
+.cost-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.cost-metrics > div { min-width: 0; }
+.cost-metrics span, .cost-metrics small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.cost-metrics strong { display: block; font-size: 16px; font-weight: 600; margin: 4px 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cost-metrics small { display: block; }
+.cost-token-details { margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
 .cost-config-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); }
 .cost-config-row .settings-field { grid-column: auto; min-width: 0; }
 .cost-config-row .settings-test-btn { align-self: end; }
-@media(max-width:768px) { .cost-summary-grid, .cost-config-row { grid-template-columns: minmax(0,1fr); } }
+@media(max-width:768px) { .cost-config-row { grid-template-columns: minmax(0,1fr); } }
+
 
 .cost-model-rates { margin-top: 20px; }
 .cost-model-rates > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
 .cost-model-rates[open] > summary { margin-bottom: 12px; }
-.cost-dashboard li { margin: 8px 0; }
-.cost-dashboard li > small, .cost-dashboard td > small { display: block; color: var(--text-muted); }
-.cost-quota-values td { vertical-align: top; }
-.cost-mobile-label { display: none; }
 #cost-detected-plans small { display: block; color: var(--text-muted); }
-
-@media(max-width:768px) {
-  .cost-quota-table, .cost-quota-table tbody { display: block; }
-  .cost-quota-table thead { display: none; }
-  .cost-quota-table tr { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); padding: 8px 0; border-bottom: 1px solid var(--border-default); }
-  .cost-quota-table td { border: 0; min-width: 0; overflow-wrap: anywhere; }
-  .cost-quota-table td:first-child, .cost-quota-table td:nth-child(2), .cost-quota-table td[colspan] { grid-column: 1 / -1; }
-  .cost-mobile-label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
-}
