@@ -260,6 +260,7 @@
 .cost-dashboard li > small, .cost-dashboard td > small { display: block; color: var(--text-muted); }
 .cost-quota-values td { vertical-align: top; }
 .cost-mobile-label { display: none; }
+#cost-detected-plans small { display: block; color: var(--text-muted); }
 
 @media(max-width:768px) {
   .cost-quota-table, .cost-quota-table tbody { display: block; }

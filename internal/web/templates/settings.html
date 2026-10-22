@@ -467,7 +467,8 @@
             <details class="settings-section settings-disclosure" id="cost-settings">
                 <summary>Costs</summary>
                 <div class="settings-disclosure-body">
-                    <p class="settings-section-desc">Enter a monthly subscription fee once. OnWatch calculates monthly, annualized and daily totals, plus the estimated fee allocated to your current Codex or Claude quota windows. Token telemetry is only needed for the separate API-equivalent cost estimate.</p>
+                    <p class="settings-section-desc">Codex plans and public list-price estimates appear automatically. Canada is the default, with CAD shown first. If the provider does not report the billing or seat tier, estimates show a price range. CAD conversions are reference estimates, not Canadian checkout prices.</p>
+                    <div id="cost-detected-plans"></div>
                     <div class="settings-fields">
                         <div class="settings-field">
                             <label for="cost-cad-per-usd">CAD per USD (optional override)</label>
@@ -477,10 +478,10 @@
                     </div>
                     <datalist id="cost-provider-options"><option value="codex"><option value="anthropic"><option value="openai"><option value="openrouter"><option value="gemini"><option value="mistral"></datalist>
                     <datalist id="cost-account-options"></datalist>
-                    <h4 class="settings-subsection-title">Subscriptions</h4>
+                    <h4 class="settings-subsection-title">Optional price overrides</h4>
                     <p class="settings-section-desc">Use a linked account name. Codex accounts are suggested automatically; the single Claude account is named default. The billing day uses UTC and defaults to the first of the month. Actual CAD fees include any conversion or card charges you choose to enter.</p>
                     <div id="cost-subscription-rows"></div>
-                    <button type="button" class="settings-test-btn" id="cost-add-subscription">Add subscription</button>
+                    <button type="button" class="settings-test-btn" id="cost-add-subscription">Add price override</button>
                     <p class="settings-section-desc">Quota value is a planning allocation: monthly fee × window duration ÷ billing-period duration × used percentage. Five-hour and weekly limits overlap, so their values must not be added. This does not represent API token spend or an additional charge.</p>
                     <details class="cost-model-rates">
                     <summary>Advanced: API-equivalent model rates</summary>

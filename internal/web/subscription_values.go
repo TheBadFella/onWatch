@@ -18,36 +18,30 @@ func (h *Handler) costAccounts() []costAccount {
 	if h.store == nil {
 		return result
 	}
-	accounts, err := h.store.QueryActiveProviderAccounts("codex")
-	if err == nil {
-		for _, a := range accounts {
-			if len(result) >= 100 {
-				break
-			}
-			result = append(result, costAccount{Provider: "codex", Account: a.Name})
-		}
-	}
-	if snapshot, err := h.store.QueryLatestAnthropic(); err == nil && snapshot != nil {
-		result = append(result, costAccount{Provider: "anthropic", Account: "default"})
+	for _, account := range h.detectedCostSubscriptions() {
+		result = append(result, costAccount{Provider: account.Provider, Account: account.Account})
 	}
 	return result
 }
 
 type subscriptionValue struct {
-	Provider   string       `json:"provider"`
-	Account    string       `json:"account"`
-	MonthlyUSD float64      `json:"monthly_usd"`
-	AnnualUSD  float64      `json:"annual_usd"`
-	DailyUSD   float64      `json:"daily_usd"`
-	MonthlyCAD *float64     `json:"monthly_cad"`
-	AnnualCAD  *float64     `json:"annual_cad"`
-	DailyCAD   *float64     `json:"daily_cad"`
-	CADSource  string       `json:"cad_source,omitempty"`
-	CycleStart time.Time    `json:"cycle_start"`
-	CycleEnd   time.Time    `json:"cycle_end"`
-	ObservedAt *time.Time   `json:"observed_at,omitempty"`
-	Reason     string       `json:"reason,omitempty"`
-	Windows    []quotaValue `json:"windows"`
+	Provider      string       `json:"provider"`
+	Account       string       `json:"account"`
+	MonthlyUSD    float64      `json:"monthly_usd"`
+	MonthlyMaxUSD *float64     `json:"monthly_max_usd,omitempty"`
+	MonthlyMaxCAD *float64     `json:"monthly_max_cad,omitempty"`
+	PriceSource   string       `json:"price_source,omitempty"`
+	AnnualUSD     float64      `json:"annual_usd"`
+	DailyUSD      float64      `json:"daily_usd"`
+	MonthlyCAD    *float64     `json:"monthly_cad"`
+	AnnualCAD     *float64     `json:"annual_cad"`
+	DailyCAD      *float64     `json:"daily_cad"`
+	CADSource     string       `json:"cad_source,omitempty"`
+	CycleStart    time.Time    `json:"cycle_start"`
+	CycleEnd      time.Time    `json:"cycle_end"`
+	ObservedAt    *time.Time   `json:"observed_at,omitempty"`
+	Reason        string       `json:"reason,omitempty"`
+	Windows       []quotaValue `json:"windows"`
 }
 type quotaValue struct {
 	Key          string     `json:"key"`
@@ -115,6 +109,8 @@ func (h *Handler) subscriptionValues(c costSettings, fx *costExchange, now time.
 		}
 		start, end := subscriptionCycle(now, s.BillingDay)
 		item := subscriptionValue{Provider: s.Provider, Account: s.Account, MonthlyUSD: *s.MonthlyUSD, AnnualUSD: *s.MonthlyUSD * 12, CycleStart: start, CycleEnd: end, Windows: []quotaValue{}}
+		item.MonthlyMaxUSD = s.MonthlyMaxUSD
+		item.PriceSource = s.PriceSource
 		days := end.Sub(start).Hours() / 24
 		item.DailyUSD = item.MonthlyUSD / days
 		if validCostNumber(s.MonthlyCAD) {
@@ -125,6 +121,10 @@ func (h *Handler) subscriptionValues(c costSettings, fx *costExchange, now time.
 			value := item.MonthlyUSD * fx.CADPerUSD
 			item.MonthlyCAD = &value
 			item.CADSource = fx.Source
+			if s.MonthlyMaxUSD != nil {
+				high := *s.MonthlyMaxUSD * fx.CADPerUSD
+				item.MonthlyMaxCAD = &high
+			}
 		}
 		if item.MonthlyCAD != nil {
 			annual := *item.MonthlyCAD * 12

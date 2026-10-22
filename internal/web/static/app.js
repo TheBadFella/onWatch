@@ -10631,7 +10631,7 @@ async function loadSettings() {
     if (!resp.ok) throw new Error('Could not load settings');
     const data = await resp.json();
 
-    if (typeof loadCostSettings === 'function') loadCostSettings(data.costs, data.cost_accounts);
+    if (typeof loadCostSettings === 'function') loadCostSettings(data.costs, data.cost_accounts, data.cost_detected_subscriptions);
 
     // Timezone
     const tzSelect = document.getElementById('settings-timezone');

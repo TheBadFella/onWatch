@@ -1,10 +1,44 @@
 # Subscription costs and quota value
 
-Open **Settings → General → Costs**. Add a subscription, choose a linked account,
-and enter the monthly USD fee you pay. OnWatch suggests saved Codex accounts;
-the single Claude connection uses provider `anthropic`, account `default`.
-For an annual subscription, enter the monthly equivalent (annual fee ÷ 12).
-Save with **Save Settings**.
+Connected Codex accounts appear automatically after the first usage reading.
+OnWatch detects the reported plan and applies public list-price estimates.
+No subscription entry, model prices or token collector is required. Prices
+follow subsequent plan changes rather than becoming saved overrides.
+
+Canada is the default. The dashboard shows CAD first and USD underneath.
+Exact Canadian checkout amounts could not be verified from the public pricing
+page, so automatic CAD values use the dated Bank of Canada conversion and are
+explicitly labelled as estimates, not localized Canadian subscription prices.
+
+The price catalog was checked on October 22, 2026 against the
+[ChatGPT pricing page](https://chatgpt.com/pricing/),
+[Plus pricing](https://help.openai.com/en/articles/6950777),
+[Pro tiers](https://help.openai.com/en/articles/9793128) and
+[Business seats](https://help.openai.com/en/articles/8792828).
+It ships with the app; it does not scrape billing pages on each refresh.
+
+| Reported Codex plan | Monthly USD reference |
+| --- | --- |
+| Free | 0 |
+| Plus | 20 |
+| Pro Lite (`prolite`) | 100 |
+| Pro Max (`promax`) | 500 |
+| Pro (`pro`) | 100–500, exact billing tier unreported |
+| Business / Team | 20–125 per seat, billing and seat tier unreported |
+
+Business Standard is USD20 per month equivalent when billed annually or USD25
+when billed monthly. Premium is USD100 or USD125 respectively. The quota API
+does not identify these choices, so the app keeps their range visible in both
+totals and quota allocations. Business totals count connected seats, not the
+whole workspace. Enterprise, unknown plans and Claude's unreported tier remain
+unpriced and are excluded from totals, which are marked partial.
+
+For optional corrections, open **Settings → General → Costs → Add price override**.
+Choose the account and enter the amount paid. Overrides take priority without
+double-counting the automatic estimate. Remove an override to return to plan
+detection. For an annual subscription, enter the monthly equivalent (annual
+fee ÷ 12). The single Claude connection uses provider `anthropic`, account
+`default`. Save with **Save Settings**.
 
 The dashboard automatically calculates monthly and annualized fees, daily
 allocations, and the estimated share of the fee used in the current 5-hour and
@@ -36,7 +70,9 @@ an entered CAD fee and no token model rates are configured.
 
 ## Billing periods and quota allocations
 
-The billing day defaults to the first of the month and can be set from 1 to 31.
+The allocation period defaults to the first of the month. The actual renewal
+day is not reported by the quota API. An optional billing-day override can be
+set from 1 to 31.
 Dates are interpreted in UTC. Days absent from a month clamp to its last day:
 a billing day of 31 produces January 31 to February 28, then February 28 to
 March 31 in a non-leap year. The dashboard shows the exact period used.
