@@ -47,6 +47,11 @@ These choices are saved for this OnWatch installation. SMTP setup reminders
 only appear when the Email delivery channel is enabled and its destination is
 incomplete. Hiding a reminder does not change notification delivery or filters.
 
+SMTP and webhook event filters also include quota exhaustion, advance window
+reset reminders, and banked reset expiry. See [notification controls and exact
+times](WEBHOOK_SETUP.md#window-ending-and-exhaustion-alerts) for configuration
+and polling limits.
+
 Browser sign-in walks through naming the account, approving the device code at
 OpenAI, and returning to OnWatch. Approval checks use the provider's polling
 interval and do not overlap. Expired codes offer a new attempt; closing the

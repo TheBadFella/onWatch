@@ -5,13 +5,14 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '../../internal/web/static/app.js'), 'utf8');
-const events = ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure'];
+const events = ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'];
 const controlId = event => 'smtp-event-' + event.replaceAll('_', '-');
 
 for (const [name, smtp, expected] of [
-  ['legacy defaults', { host: 'smtp.example.com' }, ['warning', 'critical', 'reset', 'auth_error']],
+  ['legacy defaults', { host: 'smtp.example.com' }, ['warning', 'critical', 'reset', 'auth_error', 'reset_credit_expiry']],
   ['auth only', { events: { auth_error: true } }, ['auth_error']],
   ['all disabled', { events: {} }, []],
+  ['ending and exhausted', {events:{reset_soon:true,exhausted:true}}, ['exhausted','reset_soon']],
   ['starter failure only', { events: { starter_failure: true } }, ['starter_failure']],
 ]) {
   test('SMTP settings load and save: ' + name, async () => {
@@ -80,4 +81,17 @@ test('SMTP reminders respect the email channel and saved dismissal', () => {
   const stillMissingWebhook = context.notificationDeliverySummary({notifications:{channels:{email:true,webhook:true}},hide_smtp_setup_reminder:true});
   assert.equal(stillMissingWebhook.attention, true);
   assert.match(stillMissingWebhook.text, /Webhook setup incomplete/);
+});
+
+test('webhook event controls preserve independent ending and exhaustion choices',()=>{
+ const ids=['webhook-url','webhook-event-exhausted','webhook-event-reset-soon','webhook-event-warning','webhook-event-critical'];
+ const fields=new Map(ids.map(id=>[id,{checked:false,value:''}]));
+ const context=vm.createContext({document:{getElementById:id=>fields.get(id)||null},setVal:(id,value)=>{if(fields.has(id))fields.get(id).value=value||''}});
+ vm.runInContext(source.slice(source.indexOf('function parseWebhookHeaders('),source.indexOf('// The webhook block is the tallest')),context);
+ context.loadWebhookSettings({url:'https://example.test',events:{reset_soon:true,exhausted:false}});
+ let saved=context.collectWebhookSettings();
+ assert.equal(saved.events.reset_soon,true);assert.equal(saved.events.exhausted,false);
+ fields.get('webhook-event-exhausted').checked=true;fields.get('webhook-event-reset-soon').checked=false;
+ saved=context.collectWebhookSettings();
+ assert.equal(saved.events.reset_soon,false);assert.equal(saved.events.exhausted,true);
 });

@@ -83,6 +83,18 @@
                 <h4 class="settings-subsection-title">Email Events</h4>
                 <div class="settings-fields">
                     <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-exhausted">
+                        <span>Quota exhausted (100% used)</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-reset-soon">
+                        <span>Window resets soon</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-reset-credit-expiry">
+                        <span>Banked reset expires soon</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
                         <input type="checkbox" id="smtp-event-warning" checked>
                         <span>Warning alerts</span>
                     </label>
@@ -107,7 +119,7 @@
                         <span>Quota-starter failure</span>
                     </label>
                 </div>
-                <p class="settings-section-desc">Choose which enabled notifications reach your inbox. Global notification switches still apply. Test emails always send.</p>
+                <p class="settings-section-desc">Choose which enabled notifications reach your inbox. Global switches apply to warning, critical, reset, auth and credit expiry events. Quota exhausted and window-ending reminders use their channel selections directly. Test emails always send.</p>
                 <div class="settings-actions">
                     <button class="settings-test-btn" id="smtp-test-btn" type="button">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
@@ -211,6 +223,14 @@
                 <h4 class="settings-subsection-title">Webhook Events</h4>
                 <div class="settings-fields">
                     <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="webhook-event-exhausted">
+                        <span>Quota exhausted (100% used)</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="webhook-event-reset-soon">
+                        <span>Window resets soon</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
                         <input type="checkbox" id="webhook-event-warning" checked>
                         <span>Warning alerts</span>
                     </label>
@@ -266,6 +286,18 @@
                             <input type="range" id="threshold-critical-slider" class="threshold-slider" min="0" max="100" value="95">
                             <input type="number" id="threshold-critical" class="settings-input settings-input-sm" min="0" max="100" value="95">
                         </div>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section">
+                <h3 class="settings-section-title">Window ending reminders</h3>
+                <p class="settings-section-desc">Select “Window resets soon” separately in Email Events or Webhook Events. Each selected channel receives one reminder per reported window, on the first successful provider poll within this lead time.</p>
+                <div class="settings-fields">
+                    <div class="settings-field">
+                        <label for="reset-soon-minutes">Minutes before reset</label>
+                        <input type="number" id="reset-soon-minutes" class="settings-input" min="1" max="1440" value="15">
+                        <span class="settings-field-hint">Unknown or already-passed reset times do not generate reminders. Warning and critical thresholds control alerts before quota runs out. Quota exhausted is a separate opt-in alert at 100% used.</span>
                     </div>
                 </div>
             </div>

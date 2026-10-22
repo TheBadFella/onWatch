@@ -69,6 +69,8 @@ type WebhookConfig struct {
 
 // WebhookEvents controls which events are delivered to the webhook endpoint.
 type WebhookEvents struct {
+	Exhausted         bool `json:"exhausted"`
+	ResetSoon         bool `json:"reset_soon"`
 	Warning           bool `json:"warning"`
 	Critical          bool `json:"critical"`
 	Reset             bool `json:"reset"`
@@ -81,6 +83,10 @@ type WebhookEvents struct {
 // Enabled reports whether the named event should be delivered.
 func (e WebhookEvents) Enabled(event string) bool {
 	switch event {
+	case EventExhausted:
+		return e.Exhausted
+	case EventResetSoon:
+		return e.ResetSoon
 	case EventWarning:
 		return e.Warning
 	case EventCritical:
@@ -102,6 +108,8 @@ func (e WebhookEvents) Enabled(event string) bool {
 
 // Event names used in webhook payloads and in the notification dedupe log.
 const (
+	EventExhausted         = "exhausted"
+	EventResetSoon         = "reset_soon"
 	EventWarning           = "warning"
 	EventCritical          = "critical"
 	EventReset             = "reset"
@@ -115,6 +123,8 @@ const (
 // WebhookPayload is the JSON body POSTed to the configured endpoint.
 // It carries no credentials: no OAuth tokens, API keys, or bearer tokens.
 type WebhookPayload struct {
+	ObservedAt  string                       `json:"observed_at,omitempty"`
+	Remaining   *float64                     `json:"remaining_percent,omitempty"`
 	Event       string                       `json:"event"`
 	Provider    string                       `json:"provider"`
 	QuotaKey    string                       `json:"quota_key,omitempty"`

@@ -44,9 +44,9 @@ type discordWebhookMessage struct {
 // discordColorForEvent returns a semantic decimal color for the notification event.
 func discordColorForEvent(event string) int {
 	switch event {
-	case EventCritical, EventStarterFailure:
+	case EventCritical, EventExhausted, EventStarterFailure:
 		return 0xef4444 // Red
-	case EventWarning, EventResetCreditExpiry:
+	case EventWarning, EventResetSoon, EventResetCreditExpiry:
 		return 0xf59e0b // Amber / Yellow
 	case EventReset, EventStarterSuccess:
 		return 0x10b981 // Green
@@ -73,7 +73,7 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	if payload.Reset != nil {
 		lines = append(lines, "**Usage:** "+usageChange(payload.Reset.BeforePercent, payload.Reset.AfterPercent))
 	} else if payload.Utilization != nil {
-		lines = append(lines, fmt.Sprintf("**Used:** %.1f%%", *payload.Utilization))
+		lines = append(lines, fmt.Sprintf("**Used:** %.1f%% · **Remaining:** %.1f%%", *payload.Utilization, remainingPercent(*payload.Utilization)))
 	}
 	if account != "" || len(lines) > 0 {
 		name := account
@@ -114,6 +114,17 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	if payload.Event == EventStarterSuccess {
 		title = "▶ " + context + " | Window started"
 	}
+	if payload.Event == EventExhausted {
+		title = "🚨 " + context + " | Quota exhausted"
+		description = "Reported usage has reached 100%."
+	}
+	if payload.Event == EventResetSoon {
+		title = "⌛ " + context + " | Window resets soon"
+		description = "The provider-reported reset time is approaching."
+	}
+	if t, err := time.Parse(time.RFC3339, payload.ObservedAt); err == nil {
+		fields = append(fields, discordEmbedField{Name: "Usage observed", Value: discordTime(&t)})
+	}
 	if payload.Event == EventStarterFailure {
 		title = "⚠️ " + context + " | Window could not start"
 	}
@@ -143,7 +154,7 @@ func discordTime(t *time.Time) string {
 	if t == nil {
 		return "Not reported"
 	}
-	return fmt.Sprintf("<t:%d:f> (<t:%d:R>)", t.Unix(), t.Unix())
+	return fmt.Sprintf("<t:%d:f>\n%s", t.Unix(), t.UTC().Format("2006-01-02 15:04:05 UTC"))
 }
 
 func discordLimit(s string, n int) string {

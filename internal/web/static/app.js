@@ -10649,14 +10649,15 @@ async function loadSettings() {
     }
 
     const emailEvents = data.smtp?.events;
-    ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure'].forEach(event => {
+    ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'].forEach(event => {
       const input = document.getElementById('smtp-event-' + event.replaceAll('_', '-'));
-      if (input) input.checked = emailEvents ? emailEvents[event] === true : !event.startsWith('starter_');
+      if (input) input.checked = emailEvents ? emailEvents[event] === true : ['warning', 'critical', 'reset', 'auth_error', 'reset_credit_expiry'].includes(event);
     });
 
     // Notifications
     if (data.notifications) {
       const n = data.notifications;
+      setVal('reset-soon-minutes', n.reset_soon_minutes ?? 15);
       setVal('threshold-warning', n.warning_threshold);
       setVal('threshold-warning-slider', n.warning_threshold);
       setVal('threshold-critical', n.critical_threshold);
@@ -12481,7 +12482,7 @@ function gatherSettings() {
   const smtpHost = document.getElementById('smtp-host');
   if (smtpHost) {
     settings.smtp = {
-      events: Object.fromEntries(['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure'].map(event => [
+      events: Object.fromEntries(['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'].map(event => [
         event, document.getElementById('smtp-event-' + event.replaceAll('_', '-'))?.checked ?? false,
       ])),
       host: smtpHost.value.trim(),
@@ -12514,6 +12515,7 @@ function gatherSettings() {
     });
 
     settings.notifications = {
+      reset_soon_minutes: parseInt(document.getElementById('reset-soon-minutes')?.value ?? '15', 10),
       warning_threshold: parseFloat(warningInput.value) || 80,
       critical_threshold: parseFloat(document.getElementById('threshold-critical')?.value) || 95,
       notify_warning: document.getElementById('notify-warning')?.checked ?? true,
@@ -12776,6 +12778,8 @@ function loadWebhookSettings(webhook) {
 
   const events = w.events || {};
   const eventFields = {
+    'webhook-event-exhausted': 'exhausted',
+    'webhook-event-reset-soon': 'reset_soon',
     'webhook-event-warning': 'warning',
     'webhook-event-critical': 'critical',
     'webhook-event-reset': 'reset',
@@ -12812,6 +12816,8 @@ function collectWebhookSettings() {
     timeout_seconds: parseInt(document.getElementById('webhook-timeout')?.value) || 5,
     retries: parseInt(document.getElementById('webhook-retries')?.value ?? '2') || 0,
     events: {
+      exhausted: document.getElementById('webhook-event-exhausted')?.checked ?? false,
+      reset_soon: document.getElementById('webhook-event-reset-soon')?.checked ?? false,
       warning: document.getElementById('webhook-event-warning')?.checked ?? false,
       critical: document.getElementById('webhook-event-critical')?.checked ?? false,
       reset: document.getElementById('webhook-event-reset')?.checked ?? false,

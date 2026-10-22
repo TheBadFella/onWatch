@@ -188,3 +188,28 @@ redemption from a reset that happened before its due date without a known cause.
 Generic endpoints continue receiving JSON; use `event`, rather than matching
 notification title text, to route alerts. See [reset reporting](FORK_UI.md#reset-reporting-and-readable-alerts)
 for evidence rules and upgrade behavior.
+
+### Window ending and exhaustion alerts
+
+Email Events and Webhook Events each offer **Quota exhausted** (`exhausted`,
+100% used) and **Window resets soon** (`reset_soon`). Both default off. Warning
+and critical events still use the configured usage thresholds. Banked reset
+expiry can also be selected separately for SMTP and webhook delivery.
+
+Set **Notifications → Window ending reminders → Minutes before reset** to choose
+the lead time, from 1 to 1440 minutes (default 15). Each selected channel gets
+one reminder per quota cycle, on a successful provider poll within that period.
+These two new events use channel selections directly; the existing global
+warning/critical/reset switches continue controlling their corresponding events.
+Unknown or passed reset times produce no advance reminder. Monitoring must be
+running and polling successfully. If no selected channel succeeds, delivery
+retries on later polls. A successful channel currently marks the event delivered
+for all channels, so retries are not tracked independently per channel.
+
+Quota payloads include `remaining_percent` and, when supplied by the poll,
+`observed_at`. Codex alerts use the successful poll's captured timestamp. Values
+are a snapshot at observation time; delivered messages do not update in place.
+Reset times retain the provider's timestamp. Discord shows a local date/time
+alongside the exact UTC date and time including seconds; SMTP also includes
+seconds and UTC. OnWatch cannot guarantee the provider will honor its reported
+schedule if it later changes.
