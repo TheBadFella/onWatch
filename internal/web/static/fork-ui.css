@@ -105,7 +105,6 @@
 @media (max-width: 768px) {
   .settings-page .settings-fields { grid-template-columns: minmax(0, 1fr); }
   .settings-page .settings-fields > * { grid-column: 1 / -1; }
-  .settings-page .settings-input { font-size: 16px; }
   .settings-page .settings-toggle-row { flex-wrap: wrap; gap: 12px; }
   .settings-page .settings-toggle-info { min-width: 0; flex: 1 1 160px; }
   .settings-page .settings-toggle-actions-wrap { flex-wrap: wrap; max-width: 100%; }
