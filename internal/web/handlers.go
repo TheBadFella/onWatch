@@ -456,7 +456,8 @@ func (h *Handler) codexProfilesList(w http.ResponseWriter, r *http.Request) {
 // codexProfileSave saves the current Codex auth as a new profile.
 func (h *Handler) codexProfileSave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		AuthData string `json:"auth_data,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -471,10 +472,16 @@ func (h *Handler) codexProfileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect current Codex credentials
-	creds := api.DetectCodexCredentials(h.logger)
+	// Detect current Codex credentials or use user-provided AuthData
+	var creds *api.CodexCredentials
+	if req.AuthData != "" {
+		creds = parseRawAuthData(req.AuthData)
+	}
+	if creds == nil {
+		creds = api.DetectCodexCredentials(h.logger)
+	}
 	if creds == nil || (creds.AccessToken == "" && creds.APIKey == "") {
-		respondError(w, http.StatusBadRequest, "no Codex credentials found. Run 'codex auth' first to authenticate")
+		respondError(w, http.StatusBadRequest, "no Codex credentials found. Please sign in via device auth or provide valid auth.json")
 		return
 	}
 
@@ -536,6 +543,12 @@ func (h *Handler) codexProfileSave(w http.ResponseWriter, r *http.Request) {
 		}
 		h.store.GetOrCreateProviderAccountByExternalID("codex", req.Name, externalID)
 		h.invalidateMenubarSnapshot()
+	}
+
+	if h.config != nil {
+		h.config.WriteLock()
+		h.config.CodexHasProfiles = true
+		h.config.WriteUnlock()
 	}
 
 	respondJSON(w, http.StatusCreated, map[string]interface{}{
@@ -7563,6 +7576,15 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"menubar":             menubarSettings,
 		"auto_refresh_tokens": autoRefreshTokens,
 	}
+	for _, key := range []string{"hide_connect_prompt", "hide_smtp_setup_reminder"} {
+		result[key] = false
+		if h.store != nil {
+			value, _ := h.store.GetSetting(key)
+			result[key] = value == "true"
+		}
+	}
+
+	result["costs"] = h.loadCostSettings()
 
 	// SMTP settings (never return the actual password)
 	if h.store != nil {
@@ -7676,6 +7698,45 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	result := map[string]interface{}{}
 
+	if raw, ok := body["costs"]; ok {
+		var costs costSettings
+		if err := json.Unmarshal(raw, &costs); err != nil {
+			respondError(w, 400, "invalid cost settings")
+			return
+		}
+		if err := costs.validate(); err != nil {
+			respondError(w, 400, err.Error())
+			return
+		}
+		data, _ := json.Marshal(costs)
+		if err := h.store.SetSetting("costs", string(data)); err != nil {
+			respondError(w, 500, "failed to save cost settings")
+			return
+		}
+		result["costs"] = "saved"
+	}
+
+	// Dashboard presentation preferences support independent partial updates.
+	for _, key := range []string{"hide_connect_prompt", "hide_smtp_setup_reminder"} {
+		if raw, ok := body[key]; ok {
+			var enabled *bool
+			if err := json.Unmarshal(raw, &enabled); err != nil || enabled == nil {
+				respondError(w, http.StatusBadRequest, "invalid "+key+" value")
+				return
+			}
+			value := "false"
+			if *enabled {
+				value = "true"
+			}
+			if err := h.store.SetSetting(key, value); err != nil {
+				h.logger.Error("failed to save dashboard preference", "key", key, "error", err)
+				respondError(w, http.StatusInternalServerError, "failed to save setting")
+				return
+			}
+			result[key] = *enabled
+		}
+	}
+
 	// Handle timezone
 	if raw, ok := body["timezone"]; ok {
 		var tz string
@@ -7738,14 +7799,15 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Handle SMTP settings
 	if raw, ok := body["smtp"]; ok {
 		var smtp struct {
-			Host        string `json:"host"`
-			Port        int    `json:"port"`
-			Protocol    string `json:"protocol"`
-			Username    string `json:"username"`
-			Password    string `json:"password"`
-			FromAddress string `json:"from_address"`
-			FromName    string `json:"from_name"`
-			To          string `json:"to"`
+			Events      *notify.WebhookEvents `json:"events,omitempty"`
+			Host        string                `json:"host"`
+			Port        int                   `json:"port"`
+			Protocol    string                `json:"protocol"`
+			Username    string                `json:"username"`
+			Password    string                `json:"password"`
+			FromAddress string                `json:"from_address"`
+			FromName    string                `json:"from_name"`
+			To          string                `json:"to"`
 		}
 		if err := json.Unmarshal(raw, &smtp); err != nil {
 			respondError(w, http.StatusBadRequest, "invalid smtp value")
@@ -7772,6 +7834,17 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 					respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid recipient address: %s", addr))
 					return
 				}
+			}
+		}
+
+		// Older clients omit event filters when editing connection settings.
+		if smtp.Events == nil {
+			existingJSON, _ := h.store.GetSetting("smtp")
+			var existing struct {
+				Events *notify.WebhookEvents `json:"events"`
+			}
+			if json.Unmarshal([]byte(existingJSON), &existing) == nil {
+				smtp.Events = existing.Events
 			}
 		}
 
@@ -7819,6 +7892,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Handle notification settings
 	if raw, ok := body["notifications"]; ok {
 		var notif struct {
+			ResetSoonMinutes        *int    `json:"reset_soon_minutes,omitempty"`
 			WarningThreshold        float64 `json:"warning_threshold"`
 			CriticalThreshold       float64 `json:"critical_threshold"`
 			NotifyWarning           bool    `json:"notify_warning"`
@@ -7845,6 +7919,20 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(raw, &notif); err != nil {
 			respondError(w, http.StatusBadRequest, "invalid notifications value")
 			return
+		}
+		if notif.ResetSoonMinutes != nil && (*notif.ResetSoonMinutes < 1 || *notif.ResetSoonMinutes > 1440) {
+			respondError(w, http.StatusBadRequest, "reset reminder must be between 1 and 1440 minutes")
+			return
+		}
+		if notif.ResetSoonMinutes == nil {
+			if existingJSON, _ := h.store.GetSetting("notifications"); existingJSON != "" {
+				var existing struct {
+					ResetSoonMinutes *int `json:"reset_soon_minutes"`
+				}
+				if json.Unmarshal([]byte(existingJSON), &existing) == nil {
+					notif.ResetSoonMinutes = existing.ResetSoonMinutes
+				}
+			}
 		}
 		// Validate thresholds
 		if notif.WarningThreshold < 0 || notif.WarningThreshold > 100 {
@@ -9675,6 +9763,11 @@ func (h *Handler) buildCodexCurrentOK(accountID int64) (response map[string]inte
 	}
 	hasData = true
 
+	if observations, err := h.store.QueryCodexResetObservations(accountID, 8); err == nil {
+		response["recentResets"] = observations
+	} else {
+		h.logger.Warn("Could not load Codex reset history", "error", err, "account_id", accountID)
+	}
 	response["capturedAt"] = latest.CapturedAt.Format(time.RFC3339)
 	// Snapshot age drives the dashboard's stale-card treatment: a polling-disabled
 	// or long-paused account keeps serving its last snapshot, which must not look

@@ -27,71 +27,10 @@
 
     <main class="settings-main">
         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-            <button class="settings-tab active" data-tab="email" role="tab" aria-selected="true" aria-controls="panel-email">Email (SMTP)</button>
-            <button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="panel-notifications">Notifications</button>
+            <button class="settings-tab active" data-tab="general" role="tab" aria-selected="true" aria-controls="panel-general">General</button>
             <button class="settings-tab" data-tab="providers" role="tab" aria-selected="false" aria-controls="panel-providers">Providers</button>
+            <button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="panel-notifications">Notifications</button>
             <button class="settings-tab" data-tab="menubar" role="tab" aria-selected="false" aria-controls="panel-menubar" hidden>Menubar</button>
-            <button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="panel-general">General</button>
-        </div>
-
-        <!-- Email (SMTP) Panel -->
-        <div class="settings-panel active" id="panel-email" role="tabpanel">
-            <div class="settings-section">
-                <h3 class="settings-section-title">SMTP Configuration</h3>
-                <p class="settings-section-desc">Configure your mail server to enable email notifications.</p>
-                <div class="settings-fields">
-                    <div class="settings-field">
-                        <label for="smtp-host">SMTP Host</label>
-                        <input type="text" id="smtp-host" class="settings-input" placeholder="smtp.gmail.com">
-                    </div>
-                    <div class="settings-field settings-field-half">
-                        <label for="smtp-port">Port</label>
-                        <input type="number" id="smtp-port" class="settings-input" placeholder="587" min="1" max="65535">
-                    </div>
-                    <div class="settings-field settings-field-half">
-                        <label for="smtp-protocol">Protocol</label>
-                        <select id="smtp-protocol" class="settings-input">
-                            <option value="auto" selected>Auto (Recommended)</option>
-                            <option value="starttls">STARTTLS</option>
-                            <option value="tls">SSL/TLS</option>
-                            <option value="none">None (Plaintext)</option>
-                        </select>
-                        <span class="settings-field-hint">Auto prefers STARTTLS when available and falls back to implicit TLS when the server expects encryption from the start. Use None only for plaintext SMTP.</span>
-                    </div>
-                    <div class="settings-field settings-field-half">
-                        <label for="smtp-username">Username</label>
-                        <input type="text" id="smtp-username" class="settings-input" placeholder="user@example.com" autocomplete="off">
-                    </div>
-                    <div class="settings-field settings-field-half">
-                        <label for="smtp-password">Password</label>
-                        <input type="password" id="smtp-password" class="settings-input" placeholder="App password or SMTP password" autocomplete="new-password">
-                    </div>
-                    <div class="settings-field settings-field-half">
-                        <label for="smtp-from-address">From Address</label>
-                        <input type="email" id="smtp-from-address" class="settings-input" placeholder="alerts@example.com">
-                    </div>
-                    <div class="settings-field settings-field-half">
-                        <label for="smtp-from-name">From Name</label>
-                        <input type="text" id="smtp-from-name" class="settings-input" placeholder="onWatch Alerts">
-                    </div>
-                    <div class="settings-field">
-                        <label for="smtp-to">Recipients</label>
-                        <input type="text" id="smtp-to" class="settings-input" placeholder="admin@example.com, team@example.com">
-                        <span class="settings-field-hint">Comma-separated email addresses</span>
-                    </div>
-                </div>
-                <div class="settings-actions">
-                    <button class="settings-test-btn" id="smtp-test-btn" type="button">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-                        Send Test Email
-                    </button>
-                    <span class="settings-test-result" id="smtp-test-result"></span>
-                </div>
-                <details class="smtp-diagnostics-details" hidden>
-                    <summary>Connection Diagnostics</summary>
-                    <pre class="smtp-diagnostics-output" id="smtp-diagnostics"></pre>
-                </details>
-            </div>
         </div>
 
         <!-- Notifications Panel -->
@@ -137,21 +76,110 @@
                         </label>
                     </div>
                 </div>
-                <div class="settings-actions" id="push-test-actions" hidden>
-                    <button class="settings-test-btn" id="push-test-btn" type="button">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                        Send Test Push
-                    </button>
-                    <span class="settings-test-result" id="push-test-result"></span>
-                </div>
-                <details class="push-diagnostics-details" id="push-diagnostics-section" hidden>
-                    <summary>Push Diagnostics</summary>
-                    <pre class="push-diagnostics-output" id="push-diagnostics">Collecting...</pre>
-                </details>
             </div>
             <div class="settings-divider"></div>
-            <div class="settings-section" id="webhook-config-section" hidden>
-                <h3 class="settings-section-title">Webhook Configuration</h3>
+            <details class="settings-section settings-disclosure" id="smtp-config-section">
+                <summary>Email (SMTP)</summary>
+                <div class="settings-disclosure-body">
+                <p class="settings-section-desc">Configure your mail server to enable email notifications.</p>
+                <div class="settings-fields">
+                    <div class="settings-field">
+                        <label for="smtp-host">SMTP Host</label>
+                        <input type="text" id="smtp-host" class="settings-input" placeholder="smtp.gmail.com">
+                    </div>
+                    <div class="settings-field settings-field-half">
+                        <label for="smtp-port">Port</label>
+                        <input type="number" id="smtp-port" class="settings-input" placeholder="587" min="1" max="65535">
+                    </div>
+                    <div class="settings-field settings-field-half">
+                        <label for="smtp-protocol">Protocol</label>
+                        <select id="smtp-protocol" class="settings-input">
+                            <option value="auto" selected>Auto (Recommended)</option>
+                            <option value="starttls">STARTTLS</option>
+                            <option value="tls">SSL/TLS</option>
+                            <option value="none">None (Plaintext)</option>
+                        </select>
+                        <span class="settings-field-hint">Auto prefers STARTTLS when available and falls back to implicit TLS when the server expects encryption from the start. Use None only for plaintext SMTP.</span>
+                    </div>
+                    <div class="settings-field settings-field-half">
+                        <label for="smtp-username">Username</label>
+                        <input type="text" id="smtp-username" class="settings-input" placeholder="user@example.com" autocomplete="off">
+                    </div>
+                    <div class="settings-field settings-field-half">
+                        <label for="smtp-password">Password</label>
+                        <input type="password" id="smtp-password" class="settings-input" placeholder="App password or SMTP password" autocomplete="new-password">
+                    </div>
+                    <div class="settings-field settings-field-half">
+                        <label for="smtp-from-address">From Address</label>
+                        <input type="email" id="smtp-from-address" class="settings-input" placeholder="alerts@example.com">
+                    </div>
+                    <div class="settings-field settings-field-half">
+                        <label for="smtp-from-name">From Name</label>
+                        <input type="text" id="smtp-from-name" class="settings-input" placeholder="onWatch Alerts">
+                    </div>
+                    <div class="settings-field">
+                        <label for="smtp-to">Recipients</label>
+                        <input type="text" id="smtp-to" class="settings-input" placeholder="admin@example.com, team@example.com">
+                        <span class="settings-field-hint">Comma-separated email addresses</span>
+                    </div>
+                </div>
+                <h4 class="settings-subsection-title">Email Events</h4>
+                <div class="settings-fields">
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-exhausted">
+                        <span>Quota exhausted (100% used)</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-reset-soon">
+                        <span>Window resets soon</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-reset-credit-expiry">
+                        <span>Banked reset expires soon</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-warning" checked>
+                        <span>Warning alerts</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-critical" checked>
+                        <span>Critical alerts</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-reset" checked>
+                        <span>Reset notifications</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-auth-error" checked>
+                        <span>Auth error alerts</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-starter-success">
+                        <span>Quota-starter success (Codex auto quota-starter)</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="smtp-event-starter-failure">
+                        <span>Quota-starter failure</span>
+                    </label>
+                </div>
+                <p class="settings-section-desc">Choose which enabled notifications reach your inbox. Global switches apply to warning, critical, reset, auth and credit expiry events. Quota exhausted and window-ending reminders use their channel selections directly. Test emails always send.</p>
+                <div class="settings-actions">
+                    <button class="settings-test-btn" id="smtp-test-btn" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                        Send Test Email
+                    </button>
+                    <span class="settings-test-result" id="smtp-test-result"></span>
+                </div>
+                <details class="smtp-diagnostics-details" hidden>
+                    <summary>Connection Diagnostics</summary>
+                    <pre class="smtp-diagnostics-output" id="smtp-diagnostics"></pre>
+                </details>
+                </div>
+            </details>
+            <div class="settings-divider"></div>
+            <details class="settings-section settings-disclosure" id="webhook-config-section">
+                <summary>Webhook (HTTP) <span class="settings-disclosure-status" data-channel-status></span></summary>
+                <div class="settings-disclosure-body">
                 <p class="settings-section-desc">onWatch POSTs a JSON payload to this URL. Credentials are never included in the payload.</p>
                 <div class="settings-fields">
                     <div class="settings-field">
@@ -182,6 +210,14 @@
                 </div>
                 <h4 class="settings-subsection-title">Webhook Events</h4>
                 <div class="settings-fields">
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="webhook-event-exhausted">
+                        <span>Quota exhausted (100% used)</span>
+                    </label>
+                    <label class="settings-checkbox-row settings-checkbox-row-compact">
+                        <input type="checkbox" id="webhook-event-reset-soon">
+                        <span>Window resets soon</span>
+                    </label>
                     <label class="settings-checkbox-row settings-checkbox-row-compact">
                         <input type="checkbox" id="webhook-event-warning" checked>
                         <span>Warning alerts</span>
@@ -219,7 +255,26 @@
                     <span class="settings-test-result" id="webhook-test-result"></span>
                 </div>
                 <p class="settings-section-desc">Save your settings before testing - the test uses the saved configuration.</p>
-            </div>
+                </div>
+            </details>
+            <div class="settings-divider"></div>
+            <details class="settings-section settings-disclosure" id="push-config-section">
+                <summary>Browser push</summary>
+                <div class="settings-disclosure-body">
+                    <p class="settings-section-desc">Enable this browser in Delivery Channels to receive push alerts. Test and connection details appear here when available.</p>
+                <div class="settings-actions" id="push-test-actions" hidden>
+                    <button class="settings-test-btn" id="push-test-btn" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        Send Test Push
+                    </button>
+                    <span class="settings-test-result" id="push-test-result"></span>
+                </div>
+                <details class="push-diagnostics-details" id="push-diagnostics-section" hidden>
+                    <summary>Push Diagnostics</summary>
+                    <pre class="push-diagnostics-output" id="push-diagnostics">Collecting...</pre>
+                </details>
+                </div>
+            </details>
             <div class="settings-divider"></div>
             <div class="settings-section">
                 <h3 class="settings-section-title">Global Thresholds</h3>
@@ -238,6 +293,18 @@
                             <input type="range" id="threshold-critical-slider" class="threshold-slider" min="0" max="100" value="95">
                             <input type="number" id="threshold-critical" class="settings-input settings-input-sm" min="0" max="100" value="95">
                         </div>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section">
+                <h3 class="settings-section-title">Window ending reminders</h3>
+                <p class="settings-section-desc">Select “Window resets soon” separately in Email Events or Webhook Events. Each selected channel receives one reminder per reported window, on the first successful provider poll within this lead time.</p>
+                <div class="settings-fields">
+                    <div class="settings-field">
+                        <label for="reset-soon-minutes">Minutes before reset</label>
+                        <input type="number" id="reset-soon-minutes" class="settings-input" min="1" max="1440" value="15">
+                        <span class="settings-field-hint">Unknown or already-passed reset times do not generate reminders. Warning and critical thresholds control alerts before quota runs out. Quota exhausted is a separate opt-in alert at 100% used.</span>
                     </div>
                 </div>
             </div>
@@ -396,7 +463,37 @@
         </div>
 
         <!-- General Panel -->
-        <div class="settings-panel" id="panel-general" role="tabpanel" hidden>
+        <div class="settings-panel active" id="panel-general" role="tabpanel">
+            <details class="settings-section settings-disclosure" id="cost-settings">
+                <summary>Costs</summary>
+                <div class="settings-disclosure-body">
+                    <p class="settings-section-desc">Track the monthly subscription fees you pay and estimate API-equivalent cost from token telemetry. Enter your own USD rates per million tokens. No prices or subscription charges are inferred from quota percentages.</p>
+                    <h4 class="settings-subsection-title">Subscriptions</h4>
+                    <div id="cost-subscription-rows"></div>
+                    <button type="button" class="settings-test-btn" id="cost-add-subscription">Add subscription</button>
+                    <h4 class="settings-subsection-title">Model rates</h4>
+                    <p class="settings-section-desc">Use the provider and exact model ID from API Integrations. Codex telemetry uses provider openai; Claude uses anthropic. Input token totals include cache hits. Missing cache counts leave requests unpriced when cached and regular rates differ. Save Settings applies these rates to all retained telemetry.</p>
+                    <div id="cost-rate-rows"></div>
+                    <button type="button" class="settings-test-btn" id="cost-add-rate">Add model rate</button>
+                </div>
+            </details>
+            <div class="settings-divider"></div>
+            <div class="settings-section">
+                <h3 class="settings-section-title">Homepage prompts</h3>
+                <div class="settings-fields">
+                    <label class="settings-checkbox-row">
+                        <input type="checkbox" id="settings-hide-connect-prompt">
+                        <span>Hide Connect account and Reconnect buttons on the dashboard</span>
+                    </label>
+                    <p class="settings-field-hint">You can still connect or reconnect accounts in Settings → Providers.</p>
+                    <label class="settings-checkbox-row">
+                        <input type="checkbox" id="settings-hide-smtp-setup-reminder">
+                        <span>Don't remind me to set up SMTP on the homepage</span>
+                    </label>
+                    <p class="settings-field-hint">SMTP setup reminders only appear when the Email delivery channel is enabled. Hiding the reminder does not change delivery settings.</p>
+                </div>
+            </div>
+            <div class="settings-divider"></div>
             <div class="settings-section">
                 <h3 class="settings-section-title">Credentials</h3>
                 <p class="settings-section-desc">Control how onWatch interacts with coding-harness OAuth tokens on disk (Claude Code, Kimi Code, Codex, etc.).</p>

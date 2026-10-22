@@ -17,7 +17,8 @@ type CodexTracker struct {
 	lastResets map[int64]map[string]time.Time // accountID -> quotaName -> resetTime
 	hasLast    map[int64]bool                 // accountID -> hasLast
 
-	onReset func(quotaName string)
+	onReset        func(quotaName string)
+	onAccountReset func(accountID int64, quotaName string)
 }
 
 // DefaultCodexAccountID is the default account ID for single-account setups.
@@ -57,6 +58,11 @@ func NewCodexTracker(store *store.Store, logger *slog.Logger) *CodexTracker {
 // SetOnReset registers a callback invoked when a quota reset is detected.
 func (t *CodexTracker) SetOnReset(fn func(string)) {
 	t.onReset = fn
+}
+
+// SetOnAccountReset registers an account-scoped reset callback.
+func (t *CodexTracker) SetOnAccountReset(fn func(int64, string)) {
+	t.onAccountReset = fn
 }
 
 // Process iterates over all quotas in the snapshot, detects resets, and updates cycles.
@@ -173,6 +179,9 @@ func (t *CodexTracker) processQuota(accountID int64, quota api.CodexQuota, captu
 		}
 		if t.onReset != nil {
 			t.onReset(quotaName)
+		}
+		if t.onAccountReset != nil {
+			t.onAccountReset(accountID, quotaName)
 		}
 		return nil
 	}

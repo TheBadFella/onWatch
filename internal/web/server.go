@@ -64,6 +64,7 @@ func NewServer(port int, handler *Handler, logger *slog.Logger, username, passwo
 	mux.HandleFunc(p("/api/history"), handler.cachedGET(handler.History))
 	mux.HandleFunc(p("/api/cycles"), handler.Cycles)
 	mux.HandleFunc(p("/api/summary"), handler.Summary)
+	mux.HandleFunc(p("/api/costs"), handler.cachedGET(handler.Costs))
 	mux.HandleFunc(p("/api/capabilities"), handler.Capabilities)
 	mux.HandleFunc(p("/api/menubar/summary"), handler.MenubarSummary)
 	mux.HandleFunc(p("/api/menubar/preferences"), handler.MenubarPreferences)
@@ -92,8 +93,12 @@ func NewServer(port int, handler *Handler, logger *slog.Logger, username, passwo
 	mux.HandleFunc(p("/api/push/subscribe"), handler.PushSubscribe)
 	mux.HandleFunc(p("/api/push/test"), handler.PushTest)
 	mux.HandleFunc(p("/api/codex/profiles"), handler.CodexProfiles)
+	mux.HandleFunc(p("/api/codex/device-auth/start"), handler.CodexDeviceAuthStart)
+	mux.HandleFunc(p("/api/codex/device-auth/poll"), handler.CodexDeviceAuthPoll)
 	mux.HandleFunc(p("/api/codex/usage"), handler.CodexUsage)
 	mux.HandleFunc(p("/api/codex/accounts/usage"), handler.CodexAccountsUsage)
+	mux.HandleFunc(p("/api/gemini/import-token"), handler.GeminiImportTokenRoute)
+	mux.HandleFunc(p("/api/gemini/import-status"), handler.GeminiImportStatus)
 	mux.HandleFunc(p("/api/minimax/current"), handler.currentMiniMax)
 	mux.HandleFunc(p("/api/minimax/history"), handler.historyMiniMax)
 	mux.HandleFunc(p("/api/minimax/cycles"), handler.cyclesMiniMax)
@@ -195,7 +200,7 @@ func contentTypeHandler(next http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "image/svg+xml")
 			}
 		}
-		if strings.HasSuffix(r.URL.Path, "app.js") {
+		if strings.HasSuffix(r.URL.Path, "app.js") || strings.HasSuffix(r.URL.Path, "codex-auth-helper.js") || strings.HasSuffix(r.URL.Path, "gemini-import-helper.js") {
 			// app.js must revalidate so frontend behavior updates are visible immediately.
 			w.Header().Set("Cache-Control", "no-cache")
 		} else {

@@ -1,0 +1,79 @@
+name: Sync Upstream & Build
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force Docker build even if no upstream changes'
+        type: boolean
+        default: true
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '.gitignore'
+      - '**/*_test.go'
+      - 'tests/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/sync-and-build.yml'
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: sync-and-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.sync.outputs.has_changes }}
+      sha: ${{ steps.sync.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync with upstream
+        id: sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/onllm-dev/onWatch.git || true
+          git fetch upstream main
+
+          BEHIND_COUNT=$(git rev-list HEAD..upstream/main --count)
+          echo "Commits behind upstream: $BEHIND_COUNT"
+
+          if [ "$BEHIND_COUNT" -gt 0 ]; then
+            echo "Merging upstream changes..."
+            git merge upstream/main --no-edit -m "chore(sync): merge upstream onllm-dev/onWatch updates"
+            git push origin main
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Already up to date with upstream."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: sync
+    if: |
+      always() &&
+      (github.event_name == 'push' ||
+       (needs.sync.result == 'success' &&
+        (needs.sync.outputs.has_changes == 'true' || inputs.force_build == true)))
+    uses: ./.github/workflows/fork-image.yml
+    with:
+      ref: ${{ github.event_name == 'push' && github.sha || needs.sync.outputs.sha }}
+    secrets: inherit

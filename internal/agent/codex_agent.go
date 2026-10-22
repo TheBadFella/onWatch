@@ -416,7 +416,11 @@ func (a *CodexAgent) maybeFetchResetCredits(ctx context.Context, snapshot *api.C
 		})
 		parsed = append(parsed, c)
 	}
-	if err := a.store.SyncCodexResetCredits(a.accountID, records, now); err != nil {
+	observedAt := snapshot.CapturedAt
+	if observedAt.IsZero() {
+		observedAt = now
+	}
+	if err := a.store.SyncCodexResetCredits(a.accountID, records, observedAt); err != nil {
 		a.logger.Warn("Failed to store Codex reset credits", "error", err, "account_id", a.accountID)
 		// Storage failed, so nothing below can be trusted; the next due fetch retries.
 		a.recordResetCreditsUnavailable(now)
@@ -1281,6 +1285,11 @@ func (a *CodexAgent) poll(ctx context.Context) {
 		return
 	}
 
+	// Banked reset credits (issue #152): slow cadence, read-only. Failures are
+	// contained inside maybeFetchResetCredits and never touch usage state.
+	// The clock hook keeps the cadence deterministic in tests.
+	a.maybeFetchResetCredits(ctx, snapshot, a.currentTime().UTC())
+
 	if a.tracker != nil {
 		if err := a.tracker.Process(snapshot); err != nil {
 			a.logger.Error("Codex tracker processing failed", "error", err, "account_id", a.accountID)
@@ -1291,14 +1300,10 @@ func (a *CodexAgent) poll(ctx context.Context) {
 	// unstarted (reset countdown pinned at ~full window length).
 	a.maybeAutoStartWindows(ctx, snapshot.Quotas, now, sp)
 
-	// Banked reset credits (issue #152): slow cadence, read-only. Failures are
-	// contained inside maybeFetchResetCredits and never touch usage state.
-	// The clock hook keeps the cadence deterministic in tests.
-	a.maybeFetchResetCredits(ctx, snapshot, a.currentTime().UTC())
-
 	if a.notifier != nil {
 		for _, q := range snapshot.Quotas {
 			a.notifier.Check(notify.QuotaStatus{
+				ObservedAt:  snapshot.CapturedAt,
 				Provider:    "codex",
 				QuotaKey:    q.Name,
 				AccountID:   fmt.Sprintf("%d", a.accountID),

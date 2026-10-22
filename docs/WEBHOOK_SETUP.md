@@ -12,7 +12,7 @@ used on its own - SMTP does not need to be configured.
 
 1. Open **Settings -> Notifications**.
 2. Under **Delivery Channels**, enable **Webhook (HTTP)**.
-3. Under **Webhook Configuration**, set the endpoint URL.
+3. Expand **Webhook (HTTP)** and set the endpoint URL.
 4. Choose which events to deliver.
 5. Save, then use **Send Test Webhook** to verify the endpoint.
 
@@ -39,6 +39,21 @@ The test button uses the *saved* configuration, so save before testing.
 | `starter_success` | The Codex auto quota-starter successfully started a limit window |
 | `starter_failure` | The Codex auto quota-starter ping failed |
 | `test` | You press **Send Test Webhook** |
+
+## Selecting email events in this fork
+
+This fork adds **Email Events** under **Settings -> Notifications ->
+Email (SMTP)**. Expand that section and choose warning, critical, reset, auth
+error, quota-starter success, and quota-starter failure independently from **Webhook Events**. For
+example, select only **Auth error alerts** for email and keep quota alerts on the
+webhook. Enable the matching global notification switches and delivery channels,
+then save. Global switches and per-quota exclusions still apply to quota alerts.
+Quota-starter outcomes use their channel event selections directly.
+
+Existing SMTP settings keep their previous behavior until you save an event
+selection: enabled quota and auth alerts continue to email, and starter emails
+remain off. Clearing every email event suppresses automatic emails. **Send Test
+Email** still uses the saved SMTP connection regardless of event selections.
 
 ## Payload
 
@@ -158,3 +173,43 @@ steady state and at most one per newly crossed threshold.
 | `/api/settings` | PUT | Save webhook config under the `webhook` key |
 | `/api/settings` | GET | Read config back; the bearer token is masked as `bearer_token_set` |
 | `/api/settings/webhook/test` | POST | Send a test payload (10 second cooldown) |
+
+### Fork reset context and Discord presentation
+
+This fork keeps the existing event names and adds optional `account_name` and
+`reset` fields to quota notifications. The `reset` object contains `cause`,
+`evidence`, `observedAt`, `previousResetAt`, `nextResetAt`, and recorded usage
+percentages when available. Causes are `scheduled`, `banked_credit`,
+`early_unknown`, or `unknown`. Consumers should tolerate absent fields.
+
+Discord destinations receive compact embeds with account names, human-readable
+limit labels and local timestamps. Reset wording separates observed credit
+redemption from a reset that happened before its due date without a known cause.
+Generic endpoints continue receiving JSON; use `event`, rather than matching
+notification title text, to route alerts. See [reset reporting](FORK_UI.md#reset-reporting-and-readable-alerts)
+for evidence rules and upgrade behavior.
+
+### Window ending and exhaustion alerts
+
+Email Events and Webhook Events each offer **Quota exhausted** (`exhausted`,
+100% used) and **Window resets soon** (`reset_soon`). Both default off. Warning
+and critical events still use the configured usage thresholds. Banked reset
+expiry can also be selected separately for SMTP and webhook delivery.
+
+Set **Notifications → Window ending reminders → Minutes before reset** to choose
+the lead time, from 1 to 1440 minutes (default 15). Each selected channel gets
+one reminder per quota cycle, on a successful provider poll within that period.
+These two new events use channel selections directly; the existing global
+warning/critical/reset switches continue controlling their corresponding events.
+Unknown or passed reset times produce no advance reminder. Monitoring must be
+running and polling successfully. If no selected channel succeeds, delivery
+retries on later polls. A successful channel currently marks the event delivered
+for all channels, so retries are not tracked independently per channel.
+
+Quota payloads include `remaining_percent` and, when supplied by the poll,
+`observed_at`. Codex alerts use the successful poll's captured timestamp. Values
+are a snapshot at observation time; delivered messages do not update in place.
+Reset times retain the provider's timestamp. Discord shows a local date/time
+alongside the exact UTC date and time including seconds; SMTP also includes
+seconds and UTC. OnWatch cannot guarantee the provider will honor its reported
+schedule if it later changes.

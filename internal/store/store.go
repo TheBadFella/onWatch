@@ -496,6 +496,7 @@ func (s *Store) createTables() error {
 			account_id INTEGER NOT NULL DEFAULT 1,
 			credit_id TEXT NOT NULL,
 			status TEXT NOT NULL,
+			redeemed_at TEXT,
 			reset_type TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
 			description TEXT NOT NULL DEFAULT '',
@@ -1266,6 +1267,7 @@ func (s *Store) migrateSchema() error {
 		}
 	}
 	for _, stmt := range []string{
+		`ALTER TABLE codex_reset_credits ADD COLUMN redeemed_at TEXT`,
 		`ALTER TABLE codex_reset_credits ADD COLUMN unsupported_by_plan INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE codex_reset_credits ADD COLUMN expiry_unknown INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE codex_reset_credit_checks ADD COLUMN applicable_count INTEGER`,

@@ -670,7 +670,7 @@ func TestApply_DownloadAndReplace(t *testing.T) {
 	}
 	payload := append(append([]byte(nil), current[:8]...), []byte("rest-of-binary-content-padded-to-be-non-empty")...)
 
-	wantAsset := fmt.Sprintf("/v99.0.0/onwatch-%s-%s", runtime.GOOS, runtime.GOARCH)
+	wantAsset := fmt.Sprintf("/fork-v99.0.0/onwatch-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		wantAsset += ".exe"
 	}
@@ -932,7 +932,7 @@ func TestBinaryDownloadURL_Format(t *testing.T) {
 	u.downloadURL = "https://example.com/download"
 
 	url := u.binaryDownloadURL("3.0.0")
-	if !strings.HasPrefix(url, "https://example.com/download/v3.0.0/") {
+	if !strings.HasPrefix(url, "https://example.com/download/fork-v3.0.0/") {
 		t.Errorf("unexpected URL format: %s", url)
 	}
 	if !strings.Contains(url, "onwatch-") {
@@ -1330,5 +1330,30 @@ func TestFallbackSystemctlRestart_AllMethodsFail(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "all restart methods failed") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestForkReleaseVersionAndDownload(t *testing.T) {
+	for _, tag := range []string{"fork-v1.0.0", "fork-v1.0.1"} {
+		t.Run(tag, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, `{"tag_name":%q}`, tag) }))
+			defer server.Close()
+			updater := NewUpdater("1.0.0+fork.test", slog.Default())
+			if !strings.Contains(updater.apiURL, "TheBadFella/onWatch") {
+				t.Fatal("still tracking upstream releases")
+			}
+			updater.apiURL = server.URL
+			info, err := updater.Check()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantNew := tag == "fork-v1.0.1"
+			if info.Available != wantNew || strings.Contains(info.LatestVersion, "fork-") {
+				t.Fatalf("wrong fork comparison: %+v", info)
+			}
+			if wantNew && !strings.Contains(info.DownloadURL, "/fork-v1.0.1/onwatch-") {
+				t.Fatal(info.DownloadURL)
+			}
+		})
 	}
 }
