@@ -1,11 +1,17 @@
 package tracker
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
+	"github.com/onllm-dev/onwatch/v2/internal/notify"
 	"github.com/onllm-dev/onwatch/v2/internal/store"
 )
 
@@ -364,5 +370,67 @@ func TestCodexTracker_UsageSummary_CalculatesRateAndClampsProjectedUtil(t *testi
 	}
 	if summary.ProjectedUtil != 100 {
 		t.Fatalf("ProjectedUtil = %v, want 100 (clamped)", summary.ProjectedUtil)
+	}
+}
+
+// A reset must release only that account's threshold dedupe entry. Previously
+// the application wired an accountless reset and all non-default entries stuck.
+func TestCodexTracker_AccountResetRearmsWebhook(t *testing.T) {
+	t.Parallel()
+	s := newTestCodexStore(t)
+	var deliveries atomic.Int32
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload notify.WebhookPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload.AccountID != "6" && payload.AccountID != "9" {
+			t.Errorf("lost account: %q", payload.AccountID)
+		}
+		if payload.Event != notify.EventCritical {
+			t.Errorf("event = %q", payload.Event)
+		}
+		deliveries.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer endpoint.Close()
+	raw, _ := json.Marshal(notify.WebhookConfig{URL: endpoint.URL, Events: notify.WebhookEvents{Critical: true}})
+	if err := s.SetSetting("webhook", string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSetting("notifications", `{"critical_threshold":95,"notify_critical":true,"channels":{"webhook":true}}`); err != nil {
+		t.Fatal(err)
+	}
+	engine := notify.New(s, slog.Default())
+	if err := engine.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.ConfigureWebhook(); err != nil {
+		t.Fatal(err)
+	}
+	tr := NewCodexTracker(s, slog.Default())
+	tr.SetOnAccountReset(func(accountID int64, name string) {
+		engine.Check(notify.QuotaStatus{Provider: "codex", AccountID: fmt.Sprint(accountID), QuotaKey: name, ResetOccurred: true})
+	})
+	now := time.Now().UTC()
+	reset := now.Add(5 * time.Hour)
+	poll := func(account int64, value float64, at time.Time, deadline time.Time) {
+		t.Helper()
+		if err := tr.Process(&api.CodexSnapshot{AccountID: account, CapturedAt: at, Quotas: []api.CodexQuota{{Name: "five_hour", Utilization: value, ResetsAt: &deadline}}}); err != nil {
+			t.Fatal(err)
+		}
+		engine.Check(notify.QuotaStatus{Provider: "codex", AccountID: fmt.Sprint(account), QuotaKey: "five_hour", Utilization: value})
+	}
+	poll(6, 98, now, reset)
+	poll(9, 98, now, reset)
+	poll(6, 99, now.Add(time.Minute), reset)
+	if got := deliveries.Load(); got != 2 {
+		t.Fatalf("initial deliveries = %d, want 2", got)
+	}
+	poll(6, 1, reset.Add(time.Minute), reset.Add(5*time.Hour))
+	poll(6, 98, reset.Add(2*time.Minute), reset.Add(5*time.Hour))
+	poll(9, 99, reset.Add(2*time.Minute), reset)
+	if got := deliveries.Load(); got != 3 {
+		t.Fatalf("after account 6 reset deliveries = %d, want 3", got)
 	}
 }

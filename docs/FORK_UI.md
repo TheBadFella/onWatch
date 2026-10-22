@@ -31,6 +31,34 @@ expiry when available. **None available** means the provider reported zero;
 wrap so badges and reset information remain visible on narrow screens. This
 display does not redeem reset credits.
 
+## Sign-in and account connections
+
+The Codex dashboard has a **Connect account** action. Accounts that report an
+authentication pause show **Sign-in required** and a **Reconnect** action with
+the existing account name filled in. **Usage available** describes the received
+data, not an independent credential check. Each card shows its last data time.
+Provider settings also offer **Reconnect** beside saved accounts.
+
+Browser sign-in walks through naming the account, approving the device code at
+OpenAI, and returning to OnWatch. Approval checks use the provider's polling
+interval and do not overlap. Expired codes offer a new attempt; closing the
+dialog stops checks and aborts pending browser requests. A successful connection
+stays visible until **Done** reloads usage. Copy failures are reported honestly.
+
+**Import auth.json** accepts a chosen file or pasted JSON. It checks that the
+input is a JSON object before sending it to the existing OnWatch profile API.
+Nothing is sent until **Connect account** is selected. Pasted contents are cleared
+after saving or closing. Authentication and token storage stay in the existing
+backend; these changes do not log out or reconnect an account by themselves.
+
+The OnWatch login page explains which credentials to use, labels password
+visibility, warns about Caps Lock, and shows progress while preventing duplicate
+submissions. Returning with the browser's Back button restores the form controls.
+It initializes without loading charts or making dashboard settings requests.
+Dashboard chart libraries use the same pinned versions as upstream, served from
+OnWatch's embedded assets so CDN delays cannot hold up the account controls.
+Source URLs and licenses are in `internal/web/static/vendor/README.md`.
+
 ## Live usage updates
 
 The fork includes upstream v2.14.14, including Codex reset-credit reporting,
@@ -91,3 +119,26 @@ the existing release.
 To restore a previous build, select its `sha-<commit>` image tag or digest through
 the normal server deployment flow. Provider data and credentials stay in the
 existing data mount.
+
+## Account navigation and notification recovery
+
+The sidebar provider button opens that provider's account overview, including
+when returning from an account's detail view. Codex and MiniMax show their account
+switcher after you select an individual account. Choose **All accounts** in the
+switcher, or select the provider button, to return to the overview. The switcher
+has a full-width account label when expanded and an account icon when collapsed;
+arrow keys, Enter and Escape work in its menu.
+
+Notification settings must finish loading before they can be saved. If the load
+fails, reload the settings page; blank fields cannot overwrite the saved setup.
+The dashboard shows when an enabled email or webhook channel needs a destination.
+This status describes saved configuration, not confirmed delivery.
+
+For missing webhook alerts, open **Settings > Notifications**, enable the webhook
+channel, restore its destination and save. Select the events to deliver and check
+the global event switches and thresholds too. The test button uses the saved
+configuration and bypasses event filters. A successful test alone does not prove
+that a usage threshold has fired. With repeats off, threshold alerts fire once
+per account, quota and cycle. Codex reset callbacks now preserve the account ID,
+so resetting one account clears its own alert history and leaves others alone.
+No existing alert history is deleted during the upgrade.

@@ -35,6 +35,15 @@ function codexResetSummaryHTML(credits) {
   return `<div class="reset-credit-summary" data-reset-summary="${escapeHTML(codexResetSummaryKey(credits))}"><span class="reset-summary-label">Banked resets</span>${value}${expiry}</div>`;
 }
 
+function accountConnectionHTML(account) {
+  const needsAuth = account.paused || account.authRequired;
+  const label = needsAuth ? 'Sign-in required' : account.isStale ? 'Usage out of date'
+    : account.quotas?.length ? 'Usage available' : 'Waiting for first usage';
+  const updated = Number.isFinite(Date.parse(account.capturedAt))
+    ? `<span>Updated ${escapeHTML(formatDateTime(account.capturedAt))}</span>` : '';
+  return `<div class="account-connection-info"><span class="account-connection-state" data-attention="${Boolean(needsAuth || account.isStale)}">${label}</span>${updated}</div>`;
+}
+
 function updateOverviewCountdowns(now = Date.now()) {
   document.querySelectorAll('[data-reset-deadline]').forEach(el => {
     el.textContent = overviewResetText(Number(el.dataset.resetDeadline), now);
@@ -95,13 +104,59 @@ function setupSidebar() {
     });
   }
   ['codex', 'minimax'].forEach(provider => {
-    document.getElementById(provider + '-profile-trigger')?.setAttribute('aria-label', 'Select ' + (provider === 'codex' ? 'Codex profile' : 'MiniMax account'));
+    document.getElementById(provider + '-profile-trigger')?.setAttribute('aria-label', 'Select ' + (provider === 'codex' ? 'Codex account' : 'MiniMax account'));
+    const trigger = document.getElementById(provider + '-profile-trigger');
+    const menu = document.getElementById(provider + '-profile-menu');
+    if (!trigger || !menu) return;
+    trigger.addEventListener('keydown', event => {
+      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      event.preventDefault();
+      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
+      (menu.querySelector('[aria-selected="true"]') || menu.firstElementChild)?.focus();
+    });
+    menu.addEventListener('keydown', event => {
+      const items = [...menu.querySelectorAll('[role="option"]')];
+      const index = items.indexOf(document.activeElement);
+      let next;
+      if (event.key === 'ArrowDown') next = (index + 1) % items.length;
+      else if (event.key === 'ArrowUp') next = (index - 1 + items.length) % items.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = items.length - 1;
+      else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault(); document.activeElement.click(); trigger.focus(); return;
+      } else if (event.key === 'Escape') { trigger.focus(); return; }
+      else return;
+      event.preventDefault(); items[next]?.focus();
+    });
+    menu.addEventListener('focusout', event => {
+      if (menu.contains(event.relatedTarget) || event.relatedTarget === trigger) return;
+      menu.classList.remove('open'); trigger.setAttribute('aria-expanded', 'false');
+    });
   });
   updateOverviewCountdowns();
   setInterval(() => updateOverviewCountdowns(), 1000);
 }
 
 document.addEventListener('DOMContentLoaded', setupSidebar);
+
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.querySelector('.login-form');
+  if (!form) return;
+  const submit = form.querySelector('[type="submit"]');
+  const progress = document.getElementById('login-progress');
+  const password = document.getElementById('password');
+  const reset = () => { submit.disabled = false; form.removeAttribute('aria-busy'); progress.hidden = true; };
+  form.addEventListener('submit', event => {
+    if (submit.disabled) { event.preventDefault(); return; }
+    submit.disabled = true;
+    form.setAttribute('aria-busy', 'true');
+    progress.hidden = false;
+  });
+  password?.addEventListener('keyup', event => {
+    document.getElementById('login-caps-lock').hidden = !event.getModifierState('CapsLock');
+  });
+  window.addEventListener('pageshow', reset);
+});
 
 // Reuse the existing renderers when provider data changes, without redrawing
 // charts merely because the server's reset countdown is a few seconds lower.
@@ -139,3 +194,28 @@ function patchOverviewNode(current, next) {
   });
   previous.slice(incoming.length).forEach(node => node.remove());
 }
+
+// Surface configuration gaps without exposing endpoints or credentials.
+function notificationDeliverySummary(settings) {
+  const channels = settings.notifications?.channels || {email: true, push: true};
+  const configured = [];
+  const missing = [];
+  if (channels.webhook) (settings.webhook?.url ? configured : missing).push('Webhook');
+  if (channels.email) (settings.smtp?.host && settings.smtp?.to ? configured : missing).push('Email');
+  if (channels.push) configured.push('Browser push');
+  return {attention: missing.length > 0,
+    text: missing.length ? missing.join(' and ') + ' setup incomplete. Open notification settings.'
+      : configured.length ? configured.join(' / ') + ' enabled. Check event filters in settings.' : 'Notification channels are off.'};
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const center = document.querySelector('.welcome-banner');
+  if (!center || typeof getSettingsData !== 'function') return;
+  try {
+    const summary = notificationDeliverySummary(await getSettingsData());
+    const link = document.createElement('a');
+    link.className = 'notification-delivery-status'; link.href = (typeof BASE_PATH === 'string' ? BASE_PATH : '') + '/settings';
+    link.textContent = summary.text; link.dataset.attention = String(summary.attention);
+    center.appendChild(link);
+  } catch (e) { /* The existing connection status covers failed dashboard requests. */ }
+});

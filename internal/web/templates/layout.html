@@ -22,13 +22,15 @@
 <body>
     {{if ne .Title "Login"}}<a href="#main-content" class="skip-link">Skip to dashboard</a>{{end}}
     {{template "content" .}}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" defer></script>
+    {{if ne .Title "Login"}}
+    <script src="{{.BasePath}}/static/vendor/chart.umd.min.js?v=4.4.1" defer></script>
+    <script src="{{.BasePath}}/static/vendor/chartjs-adapter-date-fns.bundle.min.js?v=3.0.0" defer></script>
     <script src="{{.BasePath}}/static/mistral-recovery.js?v={{mistralRecoveryVersion}}" defer></script>
     <script src="{{.BasePath}}/static/codex-auth-helper.js?v={{.Version}}-r3" defer></script>
     <script src="{{.BasePath}}/static/gemini-import-helper.js?v={{.Version}}" defer></script>
-    <script src="{{.BasePath}}/static/fork-ui.js?v={{.Version}}" defer></script>
     <script src="{{.BasePath}}/static/peak-hours.js?v={{peakHoursVersion}}" defer></script>
+    {{end}}
+    <script src="{{.BasePath}}/static/fork-ui.js?v={{.Version}}" defer></script>
     <script src="{{.BasePath}}/static/app.js?v={{.Version}}" defer></script>
 </body>
 </html>

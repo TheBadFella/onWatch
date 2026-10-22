@@ -34,3 +34,29 @@ for (const [name, smtp, expected] of [
     assert.deepEqual(Object.entries(saved.smtp.events).filter(([, enabled]) => enabled).map(([event]) => event), expected);
   });
 }
+
+for (const failure of ['http', 'network']) {
+  test('failed settings load cannot overwrite saved connection settings: ' + failure, async () => {
+    const State = {settingsLoaded: true};
+    const context = vm.createContext({State, document:{getElementById:()=>null},
+      showSettingsFeedback:()=>{}, authFetch:async()=>{
+        if (failure === 'network') throw new Error('offline');
+        return {ok:false};
+      }});
+    vm.runInContext(source.slice(source.indexOf('async function loadSettings()'), source.indexOf('async function populateMenubarSettings(')), context);
+    vm.runInContext(source.slice(source.indexOf('function gatherSettings()'), source.indexOf('function setupSettingsSave()')), context);
+    await context.loadSettings();
+    assert.equal(State.settingsLoaded, false);
+    assert.throws(()=>context.gatherSettings(), /load your saved settings/);
+  });
+}
+
+test('notification status exposes missing destinations without displaying private URLs', () => {
+  const fork = fs.readFileSync(path.join(__dirname, '../../internal/web/static/fork-ui.js'), 'utf8');
+  const context = vm.createContext({});
+  vm.runInContext(fork.slice(fork.indexOf('function notificationDeliverySummary('), fork.indexOf("document.addEventListener('DOMContentLoaded', async")), context);
+  const missing = context.notificationDeliverySummary({notifications:{channels:{webhook:true}},webhook:{events:{critical:true}}});
+  assert.equal(missing.attention,true);assert.match(missing.text,/Webhook setup incomplete/);
+  const ready = context.notificationDeliverySummary({notifications:{channels:{webhook:true}},webhook:{url:'https://private.example/secret-token'}});
+  assert.equal(ready.attention,false);assert.doesNotMatch(ready.text,/private|secret/);
+});
