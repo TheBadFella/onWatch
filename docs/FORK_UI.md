@@ -222,3 +222,11 @@ this version reset does not downgrade or reset stored usage.
 
 See [cost tracking](FORK_COSTS.md) for monthly subscriptions and API-equivalent
 estimates. Quota percentages cannot establish token spend.
+
+## Subscription-based value calculations
+
+From fork 1.0.1, **Settings → General → Costs** calculates monthly, annualized
+and daily subscription fees in USD/CAD, plus separate current-window quota
+allocations for linked Codex and Claude accounts. Enter the fee once. Token
+telemetry and model prices are only needed for the separate Advanced API-cost
+view. See [cost setup and allocation assumptions](FORK_COSTS.md).

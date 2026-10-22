@@ -252,3 +252,20 @@
 .cost-config-row .settings-field { grid-column: auto; min-width: 0; }
 .cost-config-row .settings-test-btn { align-self: end; }
 @media(max-width:768px) { .cost-summary-grid, .cost-config-row { grid-template-columns: minmax(0,1fr); } }
+
+.cost-model-rates { margin-top: 20px; }
+.cost-model-rates > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.cost-model-rates[open] > summary { margin-bottom: 12px; }
+.cost-dashboard li { margin: 8px 0; }
+.cost-dashboard li > small, .cost-dashboard td > small { display: block; color: var(--text-muted); }
+.cost-quota-values td { vertical-align: top; }
+.cost-mobile-label { display: none; }
+
+@media(max-width:768px) {
+  .cost-quota-table, .cost-quota-table tbody { display: block; }
+  .cost-quota-table thead { display: none; }
+  .cost-quota-table tr { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); padding: 8px 0; border-bottom: 1px solid var(--border-default); }
+  .cost-quota-table td { border: 0; min-width: 0; overflow-wrap: anywhere; }
+  .cost-quota-table td:first-child, .cost-quota-table td:nth-child(2), .cost-quota-table td[colspan] { grid-column: 1 / -1; }
+  .cost-mobile-label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+}

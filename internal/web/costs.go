@@ -15,6 +15,8 @@ type costSubscription struct {
 	Provider   string   `json:"provider"`
 	Account    string   `json:"account"`
 	MonthlyUSD *float64 `json:"monthly_usd"`
+	MonthlyCAD *float64 `json:"monthly_cad,omitempty"`
+	BillingDay int      `json:"billing_day,omitempty"`
 }
 type costRate struct {
 	Provider string   `json:"provider"`
@@ -24,6 +26,7 @@ type costRate struct {
 	Output   *float64 `json:"output_per_million"`
 }
 type costSettings struct {
+	CADPerUSD     *float64           `json:"cad_per_usd,omitempty"`
 	Subscriptions []costSubscription `json:"subscriptions"`
 	Rates         []costRate         `json:"rates"`
 }
@@ -32,12 +35,21 @@ func validCostNumber(n *float64) bool {
 	return n != nil && !math.IsNaN(*n) && !math.IsInf(*n, 0) && *n >= 0 && *n <= 1000000
 }
 func (c costSettings) validate() error {
+	if c.CADPerUSD != nil && (!validCostNumber(c.CADPerUSD) || *c.CADPerUSD <= 0 || *c.CADPerUSD > 100) {
+		return fmt.Errorf("CAD per USD must be greater than 0 and at most 100")
+	}
 	if len(c.Subscriptions) > 100 || len(c.Rates) > 100 {
 		return fmt.Errorf("at most 100 subscriptions and model rates are supported")
 	}
 	seen := map[string]bool{}
 	for _, s := range c.Subscriptions {
-		key := s.Provider + "\x00" + s.Account
+		if s.MonthlyCAD != nil && !validCostNumber(s.MonthlyCAD) {
+			return fmt.Errorf("monthly CAD fee must be between 0 and 1000000")
+		}
+		if s.BillingDay < 0 || s.BillingDay > 31 {
+			return fmt.Errorf("billing day must be between 1 and 31")
+		}
+		key := costProvider(s.Provider) + "\x00" + s.Account
 		if strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Account) == "" || len(s.Provider) > 64 || len(s.Account) > 256 || !validCostNumber(s.MonthlyUSD) || seen[key] {
 			return fmt.Errorf("each subscription needs a unique provider/account and a monthly USD fee from 0 to 1000000")
 		}
@@ -117,11 +129,31 @@ func (h *Handler) Costs(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := h.loadCostSettings()
 	items, total, unpriced := priceCostUsage(rows, settings)
-	monthly := 0.0
-	for _, s := range settings.Subscriptions {
-		if validCostNumber(s.MonthlyUSD) {
-			monthly += *s.MonthlyUSD
+	fx := h.costExchange(r.Context(), settings, now)
+	plans := h.subscriptionValues(settings, fx, now)
+	monthly, annual, daily := 0.0, 0.0, 0.0
+	monthlyCAD, annualCAD, dailyCAD := 0.0, 0.0, 0.0
+	cadComplete := true
+	for _, plan := range plans {
+		monthly += plan.MonthlyUSD
+		annual += plan.AnnualUSD
+		daily += plan.DailyUSD
+		if plan.MonthlyCAD == nil {
+			cadComplete = false
+		} else {
+			monthlyCAD += *plan.MonthlyCAD
+			annualCAD += *plan.AnnualCAD
+			dailyCAD += *plan.DailyCAD
 		}
 	}
-	respondJSON(w, 200, map[string]interface{}{"month_start": start, "as_of": now, "subscriptions": settings.Subscriptions, "subscription_monthly_usd": monthly, "estimated_api_usd": total, "usage": items, "unpriced_requests": unpriced, "truncated": truncated})
+	result := map[string]interface{}{"month_start": start, "as_of": now, "subscriptions": settings.Subscriptions, "subscription_values": plans, "subscription_monthly_usd": monthly, "subscription_annual_usd": annual, "subscription_daily_usd": daily, "estimated_api_usd": total, "usage": items, "unpriced_requests": unpriced, "truncated": truncated, "exchange": fx}
+	if cadComplete && len(plans) > 0 {
+		result["subscription_monthly_cad"] = monthlyCAD
+		result["subscription_annual_cad"] = annualCAD
+		result["subscription_daily_cad"] = dailyCAD
+	}
+	if fx != nil {
+		result["estimated_api_cad"] = total * fx.CADPerUSD
+	}
+	respondJSON(w, 200, result)
 }
