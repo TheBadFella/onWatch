@@ -32,7 +32,7 @@ const localStorage={getItem:()=>null,setItem:()=>{}}; const sessionStorage=local
 const getComputedStyle=()=>({getPropertyValue:()=>''});
 function Chart(){ this.options={scales:{x:{},y:{}}}; this.data={datasets:[]}; this.destroy=()=>{}; this.update=()=>{}; }
 console.warn=()=>{};
-` + string(source) + `
+` + readStaticFile(t, "static/fork-ui.js") + "\n" + string(source) + `
 (async()=>{
  const row=(minutesAgo)=>({capturedAt:new Date(Date.now()-minutesAgo*60000).toISOString(),subscriptionPercent:10,searchPercent:2,toolCallsPercent:1});
  State.allProvidersCurrent={ synthetic:{quotas:[]}, zai:{quotas:[]} };

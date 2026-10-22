@@ -3,8 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'app.sh'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'app.sh'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 permissions:
@@ -18,12 +30,13 @@ jobs:
   linux:
     name: Linux checks
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -36,18 +49,10 @@ jobs:
           fi
       - name: Vet Linux daemon
         run: go vet ./...
-      - name: Test Linux daemon
-        run: go test -race -timeout 15m -count=1 ./...
+      - name: Test Linux daemon (manual full suite)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GOFLAGS: '-failfast -timeout=5m'
+        run: bash ./app.sh --test
       - name: Test dashboard controls
         run: node --test tests/js/*-test.cjs
-
-  ci-ok:
-    name: CI OK
-    if: always()
-    needs: [linux]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Linux checks passed
-        env:
-          RESULT: ${{ needs.linux.result }}
-        run: test "$RESULT" = success

@@ -17,6 +17,10 @@ on:
       - 'README.md'
       - 'docs/**'
       - '.gitignore'
+      - '**/*_test.go'
+      - 'tests/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/sync-and-build.yml'
 
 permissions:
   contents: write
