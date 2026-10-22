@@ -12,7 +12,7 @@ used on its own - SMTP does not need to be configured.
 
 1. Open **Settings -> Notifications**.
 2. Under **Delivery Channels**, enable **Webhook (HTTP)**.
-3. Under **Webhook Configuration**, set the endpoint URL.
+3. Expand **Webhook (HTTP)** and set the endpoint URL.
 4. Choose which events to deliver.
 5. Save, then use **Send Test Webhook** to verify the endpoint.
 
@@ -43,8 +43,8 @@ The test button uses the *saved* configuration, so save before testing.
 ## Selecting email events in this fork
 
 This fork adds **Email Events** under **Settings -> Notifications ->
-SMTP Configuration**. Choose warning, critical, reset, auth error, quota-starter
-success, and quota-starter failure independently from **Webhook Events**. For
+Email (SMTP)**. Expand that section and choose warning, critical, reset, auth
+error, quota-starter success, and quota-starter failure independently from **Webhook Events**. For
 example, select only **Auth error alerts** for email and keep quota alerts on the
 webhook. Enable the matching global notification switches and delivery channels,
 then save. Global switches and per-quota exclusions still apply to quota alerts.

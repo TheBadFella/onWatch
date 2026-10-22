@@ -12829,14 +12829,15 @@ function collectWebhookSettings() {
   };
 }
 
-// The webhook block is the tallest section on the Notifications tab, so it only
-// unfolds once the channel is switched on. The fields keep their values while
-// hidden, so toggling the channel back on restores whatever was typed.
+// Keep configuration accessible while the channel is off, without changing
+// whether the user has expanded the disclosure.
 function syncWebhookConfigVisibility() {
   const section = document.getElementById('webhook-config-section');
   const toggle = document.getElementById('channel-webhook');
   if (!section || !toggle) return;
-  section.hidden = !toggle.checked;
+  section.hidden = false;
+  const status = section.querySelector('[data-channel-status]');
+  if (status) status.textContent = toggle.checked ? 'Enabled' : 'Off';
 }
 
 function setupWebhookConfigDisclosure() {
