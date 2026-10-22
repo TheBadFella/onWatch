@@ -95,6 +95,21 @@
 .smtp-reminder-dismiss input { flex-shrink: 0; width: 18px; height: 18px; }
 .notification-delivery-notice [role="status"] { color: var(--text-muted); font-size: 12px; }
 .hide-connect-prompt #main-content [data-codex-connect] { display: none; }
+.settings-page .settings-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-page .settings-fields > *, .settings-page .settings-input { min-width: 0; }
+.settings-page .settings-field-hint { overflow-wrap: anywhere; }
+.settings-disclosure > summary { cursor: pointer; font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.settings-disclosure > summary:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 4px; border-radius: var(--radius-sm); }
+.settings-disclosure-body { margin-top: 16px; }
+.settings-disclosure-status { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+@media (max-width: 768px) {
+  .settings-page .settings-fields { grid-template-columns: minmax(0, 1fr); }
+  .settings-page .settings-fields > * { grid-column: 1 / -1; }
+  .settings-page .settings-input { font-size: 16px; }
+  .settings-page .settings-toggle-row { flex-wrap: wrap; gap: 12px; }
+  .settings-page .settings-toggle-info { min-width: 0; flex: 1 1 160px; }
+  .settings-page .settings-toggle-actions-wrap { flex-wrap: wrap; max-width: 100%; }
+}
 @media (max-width: 720px) {
   .settings-page .footer-content, .settings-page .footer-links { flex-wrap: wrap; }
 }

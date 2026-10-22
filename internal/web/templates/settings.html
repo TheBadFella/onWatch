@@ -27,17 +27,60 @@
 
     <main class="settings-main">
         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-            <button class="settings-tab active" data-tab="email" role="tab" aria-selected="true" aria-controls="panel-email">Email (SMTP)</button>
-            <button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="panel-notifications">Notifications</button>
+            <button class="settings-tab active" data-tab="general" role="tab" aria-selected="true" aria-controls="panel-general">General</button>
             <button class="settings-tab" data-tab="providers" role="tab" aria-selected="false" aria-controls="panel-providers">Providers</button>
+            <button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="panel-notifications">Notifications</button>
             <button class="settings-tab" data-tab="menubar" role="tab" aria-selected="false" aria-controls="panel-menubar" hidden>Menubar</button>
-            <button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="panel-general">General</button>
         </div>
 
-        <!-- Email (SMTP) Panel -->
-        <div class="settings-panel active" id="panel-email" role="tabpanel">
+        <!-- Notifications Panel -->
+        <div class="settings-panel" id="panel-notifications" role="tabpanel" hidden>
             <div class="settings-section">
-                <h3 class="settings-section-title">SMTP Configuration</h3>
+                <h3 class="settings-section-title">Delivery Channels</h3>
+                <p class="settings-section-desc">Choose how to receive quota alerts.</p>
+                <div class="settings-fields">
+                    <div class="settings-toggle-row">
+                        <div class="settings-toggle-info">
+                            <div class="settings-toggle-label">Email (SMTP)</div>
+                            <div class="settings-toggle-sublabel">Send alerts via email - requires SMTP configuration</div>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="channel-email" checked>
+                            <span class="settings-toggle-track"></span>
+                        </label>
+                    </div>
+                    <div class="settings-toggle-row">
+                        <div class="settings-toggle-info">
+                            <div class="settings-toggle-label">Push Notifications</div>
+                            <div class="settings-toggle-sublabel" id="push-status-label">Checking browser support...</div>
+                        </div>
+                        <div class="settings-toggle-actions-wrap">
+                            <label class="settings-toggle">
+                                <input type="checkbox" id="channel-push">
+                                <span class="settings-toggle-track"></span>
+                            </label>
+                            <button class="settings-test-btn settings-test-btn-sm" id="push-subscribe-btn" type="button" hidden>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                Enable
+                            </button>
+                        </div>
+                    </div>
+                    <div class="settings-toggle-row">
+                        <div class="settings-toggle-info">
+                            <div class="settings-toggle-label">Webhook (HTTP)</div>
+                            <div class="settings-toggle-sublabel">POST alerts to any HTTP endpoint - ntfy, Gotify, or your own service</div>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="channel-webhook">
+                            <span class="settings-toggle-track"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-divider"></div>
+            <details class="settings-section settings-disclosure" id="smtp-config-section">
+                <summary>Email (SMTP)</summary>
+                <div class="settings-disclosure-body">
                 <p class="settings-section-desc">Configure your mail server to enable email notifications.</p>
                 <div class="settings-fields">
                     <div class="settings-field">
@@ -131,67 +174,12 @@
                     <summary>Connection Diagnostics</summary>
                     <pre class="smtp-diagnostics-output" id="smtp-diagnostics"></pre>
                 </details>
-            </div>
-        </div>
-
-        <!-- Notifications Panel -->
-        <div class="settings-panel" id="panel-notifications" role="tabpanel" hidden>
-            <div class="settings-section">
-                <h3 class="settings-section-title">Delivery Channels</h3>
-                <p class="settings-section-desc">Choose how to receive quota alerts.</p>
-                <div class="settings-fields">
-                    <div class="settings-toggle-row">
-                        <div class="settings-toggle-info">
-                            <div class="settings-toggle-label">Email (SMTP)</div>
-                            <div class="settings-toggle-sublabel">Send alerts via email - requires SMTP configuration</div>
-                        </div>
-                        <label class="settings-toggle">
-                            <input type="checkbox" id="channel-email" checked>
-                            <span class="settings-toggle-track"></span>
-                        </label>
-                    </div>
-                    <div class="settings-toggle-row">
-                        <div class="settings-toggle-info">
-                            <div class="settings-toggle-label">Push Notifications</div>
-                            <div class="settings-toggle-sublabel" id="push-status-label">Checking browser support...</div>
-                        </div>
-                        <div class="settings-toggle-actions-wrap">
-                            <label class="settings-toggle">
-                                <input type="checkbox" id="channel-push">
-                                <span class="settings-toggle-track"></span>
-                            </label>
-                            <button class="settings-test-btn settings-test-btn-sm" id="push-subscribe-btn" type="button" hidden>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                Enable
-                            </button>
-                        </div>
-                    </div>
-                    <div class="settings-toggle-row">
-                        <div class="settings-toggle-info">
-                            <div class="settings-toggle-label">Webhook (HTTP)</div>
-                            <div class="settings-toggle-sublabel">POST alerts to any HTTP endpoint - ntfy, Gotify, or your own service</div>
-                        </div>
-                        <label class="settings-toggle">
-                            <input type="checkbox" id="channel-webhook">
-                            <span class="settings-toggle-track"></span>
-                        </label>
-                    </div>
                 </div>
-                <div class="settings-actions" id="push-test-actions" hidden>
-                    <button class="settings-test-btn" id="push-test-btn" type="button">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                        Send Test Push
-                    </button>
-                    <span class="settings-test-result" id="push-test-result"></span>
-                </div>
-                <details class="push-diagnostics-details" id="push-diagnostics-section" hidden>
-                    <summary>Push Diagnostics</summary>
-                    <pre class="push-diagnostics-output" id="push-diagnostics">Collecting...</pre>
-                </details>
-            </div>
+            </details>
             <div class="settings-divider"></div>
-            <div class="settings-section" id="webhook-config-section" hidden>
-                <h3 class="settings-section-title">Webhook Configuration</h3>
+            <details class="settings-section settings-disclosure" id="webhook-config-section">
+                <summary>Webhook (HTTP) <span class="settings-disclosure-status" data-channel-status></span></summary>
+                <div class="settings-disclosure-body">
                 <p class="settings-section-desc">onWatch POSTs a JSON payload to this URL. Credentials are never included in the payload.</p>
                 <div class="settings-fields">
                     <div class="settings-field">
@@ -267,7 +255,26 @@
                     <span class="settings-test-result" id="webhook-test-result"></span>
                 </div>
                 <p class="settings-section-desc">Save your settings before testing - the test uses the saved configuration.</p>
-            </div>
+                </div>
+            </details>
+            <div class="settings-divider"></div>
+            <details class="settings-section settings-disclosure" id="push-config-section">
+                <summary>Browser push</summary>
+                <div class="settings-disclosure-body">
+                    <p class="settings-section-desc">Enable this browser in Delivery Channels to receive push alerts. Test and connection details appear here when available.</p>
+                <div class="settings-actions" id="push-test-actions" hidden>
+                    <button class="settings-test-btn" id="push-test-btn" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        Send Test Push
+                    </button>
+                    <span class="settings-test-result" id="push-test-result"></span>
+                </div>
+                <details class="push-diagnostics-details" id="push-diagnostics-section" hidden>
+                    <summary>Push Diagnostics</summary>
+                    <pre class="push-diagnostics-output" id="push-diagnostics">Collecting...</pre>
+                </details>
+                </div>
+            </details>
             <div class="settings-divider"></div>
             <div class="settings-section">
                 <h3 class="settings-section-title">Global Thresholds</h3>
@@ -456,7 +463,7 @@
         </div>
 
         <!-- General Panel -->
-        <div class="settings-panel" id="panel-general" role="tabpanel" hidden>
+        <div class="settings-panel active" id="panel-general" role="tabpanel">
             <div class="settings-section">
                 <h3 class="settings-section-title">Homepage prompts</h3>
                 <div class="settings-fields">

@@ -87,7 +87,7 @@ test('webhook event controls preserve independent ending and exhaustion choices'
  const ids=['webhook-url','webhook-event-exhausted','webhook-event-reset-soon','webhook-event-warning','webhook-event-critical'];
  const fields=new Map(ids.map(id=>[id,{checked:false,value:''}]));
  const context=vm.createContext({document:{getElementById:id=>fields.get(id)||null},setVal:(id,value)=>{if(fields.has(id))fields.get(id).value=value||''}});
- vm.runInContext(source.slice(source.indexOf('function parseWebhookHeaders('),source.indexOf('// The webhook block is the tallest')),context);
+ vm.runInContext(source.slice(source.indexOf('function parseWebhookHeaders('),source.indexOf('function syncWebhookConfigVisibility(')),context);
  context.loadWebhookSettings({url:'https://example.test',events:{reset_soon:true,exhausted:false}});
  let saved=context.collectWebhookSettings();
  assert.equal(saved.events.reset_soon,true);assert.equal(saved.events.exhausted,false);

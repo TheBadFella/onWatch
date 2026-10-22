@@ -33,6 +33,13 @@ display does not redeem reset credits.
 
 ## Sign-in and account connections
 
+Settings opens on **General**, followed by **Providers** and **Notifications**.
+Email (SMTP), Webhook (HTTP), and Browser push have expandable sections under
+Notifications. Expand a section to edit its settings, then use **Save Settings**.
+Collapsing a section preserves entered values. SMTP and webhook configuration
+remain accessible even when their delivery channel is off. Mobile forms stack
+fields vertically, including SMTP username and password.
+
 The Codex dashboard has a **Connect account** action. Accounts that report an
 authentication pause show **Sign-in required** and a **Reconnect** action with
 the existing account name filled in. **Usage available** describes the received
