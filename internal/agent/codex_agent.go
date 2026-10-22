@@ -1303,6 +1303,7 @@ func (a *CodexAgent) poll(ctx context.Context) {
 	if a.notifier != nil {
 		for _, q := range snapshot.Quotas {
 			a.notifier.Check(notify.QuotaStatus{
+				ObservedAt:  snapshot.CapturedAt,
 				Provider:    "codex",
 				QuotaKey:    q.Name,
 				AccountID:   fmt.Sprintf("%d", a.accountID),

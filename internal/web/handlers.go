@@ -7872,6 +7872,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Handle notification settings
 	if raw, ok := body["notifications"]; ok {
 		var notif struct {
+			ResetSoonMinutes        *int    `json:"reset_soon_minutes,omitempty"`
 			WarningThreshold        float64 `json:"warning_threshold"`
 			CriticalThreshold       float64 `json:"critical_threshold"`
 			NotifyWarning           bool    `json:"notify_warning"`
@@ -7898,6 +7899,20 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(raw, &notif); err != nil {
 			respondError(w, http.StatusBadRequest, "invalid notifications value")
 			return
+		}
+		if notif.ResetSoonMinutes != nil && (*notif.ResetSoonMinutes < 1 || *notif.ResetSoonMinutes > 1440) {
+			respondError(w, http.StatusBadRequest, "reset reminder must be between 1 and 1440 minutes")
+			return
+		}
+		if notif.ResetSoonMinutes == nil {
+			if existingJSON, _ := h.store.GetSetting("notifications"); existingJSON != "" {
+				var existing struct {
+					ResetSoonMinutes *int `json:"reset_soon_minutes"`
+				}
+				if json.Unmarshal([]byte(existingJSON), &existing) == nil {
+					notif.ResetSoonMinutes = existing.ResetSoonMinutes
+				}
+			}
 		}
 		// Validate thresholds
 		if notif.WarningThreshold < 0 || notif.WarningThreshold > 100 {

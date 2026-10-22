@@ -86,5 +86,9 @@ func notificationTime(t *time.Time) string {
 	if t == nil {
 		return "Not reported"
 	}
-	return t.UTC().Format("Jan 2, 2006 at 15:04 UTC")
+	return t.UTC().Format("Jan 2, 2006 at 15:04:05 UTC")
+}
+
+func remainingPercent(used float64) float64 {
+	return max(0, min(100, 100-used))
 }

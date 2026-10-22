@@ -30,6 +30,7 @@ type NotificationEngine struct {
 
 // NotificationConfig holds threshold and delivery settings.
 type NotificationConfig struct {
+	ResetSoon time.Duration                // lead time for opt-in window-ending alerts
 	Warning   float64                      // global warning threshold (default 80)
 	Critical  float64                      // global critical threshold (default 95)
 	Overrides map[string]ThresholdOverride // per provider+quota overrides (legacy key: quota only)
@@ -68,6 +69,7 @@ type NotificationTypes struct {
 
 // QuotaStatus represents the current state of a quota for notification evaluation.
 type QuotaStatus struct {
+	ObservedAt    time.Time // captured by the successful provider poll, if supplied
 	Provider      string
 	QuotaKey      string
 	AccountID     string // For multi-account providers (e.g., Codex)
@@ -86,6 +88,7 @@ func New(s *store.Store, logger *slog.Logger) *NotificationEngine {
 		logger: logger,
 		now:    time.Now,
 		cfg: NotificationConfig{
+			ResetSoon: 15 * time.Minute,
 			Warning:   80,
 			Critical:  95,
 			Overrides: make(map[string]ThresholdOverride),
@@ -128,6 +131,7 @@ func (e *NotificationEngine) Config() NotificationConfig {
 
 // notificationSettingsJSON matches the JSON shape saved by the handler's UpdateSettings.
 type notificationSettingsJSON struct {
+	ResetSoonMinutes        *int                  `json:"reset_soon_minutes,omitempty"`
 	WarningThreshold        float64               `json:"warning_threshold"`
 	CriticalThreshold       float64               `json:"critical_threshold"`
 	NotifyWarning           bool                  `json:"notify_warning"`
@@ -164,6 +168,9 @@ func (e *NotificationEngine) Reload() error {
 	var notif notificationSettingsJSON
 	if err := json.Unmarshal([]byte(v), &notif); err != nil {
 		return fmt.Errorf("notify.Reload: invalid notifications JSON: %w", err)
+	}
+	if notif.ResetSoonMinutes != nil && *notif.ResetSoonMinutes > 0 {
+		e.cfg.ResetSoon = time.Duration(*notif.ResetSoonMinutes) * time.Minute
 	}
 
 	if notif.WarningThreshold > 0 {
@@ -465,6 +472,19 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 		return
 	}
 
+	// These events are independently selected by SMTP/webhook, and fire once
+	// per reported window even when repeating usage alerts is enabled.
+	eventChannels := channels
+	eventChannels.enabled.Push = false
+	if status.Utilization >= 100 && (channels.emailEnabled(EventExhausted) || channels.webhookEnabled(EventExhausted)) {
+		e.sendNotification(eventChannels, repeatPolicy{}, status, EventExhausted, 100)
+	}
+	remaining := status.ResetAt.Sub(e.clock())
+	if !status.ResetAt.IsZero() && remaining > 0 && remaining <= cfg.ResetSoon &&
+		(channels.emailEnabled(EventResetSoon) || channels.webhookEnabled(EventResetSoon)) {
+		e.sendNotification(eventChannels, repeatPolicy{}, status, EventResetSoon, 0)
+	}
+
 	// Resolve thresholds
 	warningThreshold := cfg.Warning
 	criticalThreshold := cfg.Critical
@@ -506,6 +526,7 @@ func (e *NotificationEngine) CheckCodexReset(accountID int64, quotaName string) 
 		for _, observation := range observations {
 			if observation.QuotaName == quotaName {
 				status.Reset = &observation
+				status.ObservedAt = observation.ObservedAt
 				if observation.AfterPercent != nil {
 					status.Utilization = *observation.AfterPercent
 				}
@@ -707,6 +728,10 @@ func (e *NotificationEngine) buildSubject(status QuotaStatus, notifType string) 
 	}
 	quota := quotaLabel(status.QuotaKey)
 	switch notifType {
+	case EventExhausted:
+		return fmt.Sprintf("%s | %s | Quota exhausted", context, quota)
+	case EventResetSoon:
+		return fmt.Sprintf("%s | %s | Window resets soon", context, quota)
 	case EventCritical:
 		return fmt.Sprintf("[CRITICAL] %s | %s at %.1f%%", context, quota, status.Utilization)
 	case EventWarning:
@@ -735,7 +760,10 @@ func (e *NotificationEngine) buildBody(status QuotaStatus, notifType string) str
 	if status.Reset != nil {
 		fmt.Fprintf(&sb, "Usage: %s\nPrevious due time: %s\nNext due time: %s\nObserved: %s\n", usageChange(status.Reset.BeforePercent, status.Reset.AfterPercent), notificationTime(status.Reset.PreviousResetAt), notificationTime(status.Reset.NextResetAt), status.Reset.ObservedAt.UTC().Format(time.RFC3339))
 	} else if notifType != EventReset {
-		fmt.Fprintf(&sb, "Usage: %.1f%% used\n", status.Utilization)
+		fmt.Fprintf(&sb, "Usage: %.1f%% used | %.1f%% remaining\n", status.Utilization, remainingPercent(status.Utilization))
+	}
+	if !status.ObservedAt.IsZero() {
+		fmt.Fprintf(&sb, "Usage observed: %s\n", notificationTime(&status.ObservedAt))
 	}
 	if !status.ResetAt.IsZero() && status.Reset == nil {
 		fmt.Fprintf(&sb, "Next reset: %s\n", notificationTime(&status.ResetAt))
@@ -894,7 +922,7 @@ func (c channelSet) emailEnabled(event string) bool {
 	if events := c.mailer.config.Events; events != nil {
 		return events.Enabled(event)
 	}
-	return event != EventStarterSuccess && event != EventStarterFailure
+	return event != EventStarterSuccess && event != EventStarterFailure && event != EventExhausted && event != EventResetSoon
 }
 
 // webhookEnabled reports whether the webhook channel should deliver this event.
@@ -934,6 +962,11 @@ func webhookPayloadForQuota(status QuotaStatus, event, title, message string, th
 	utilization := status.Utilization
 	if event != EventReset || status.Reset != nil && status.Reset.AfterPercent != nil {
 		payload.Utilization = &utilization
+		remaining := remainingPercent(utilization)
+		payload.Remaining = &remaining
+	}
+	if !status.ObservedAt.IsZero() {
+		payload.ObservedAt = status.ObservedAt.UTC().Format(time.RFC3339)
 	}
 	if status.Limit > 0 {
 		limit := status.Limit

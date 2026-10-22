@@ -55,3 +55,33 @@ func TestDashboardPromptPreferences(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowReminderSettings(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := NewHandler(s, nil, nil, nil, createTestConfigWithSynthetic())
+	for _, body := range []string{`{"notifications":{"warning_threshold":80,"critical_threshold":95,"reset_soon_minutes":30}}`, `{"notifications":{"warning_threshold":80,"critical_threshold":95}}`} {
+		rr := httptest.NewRecorder()
+		h.UpdateSettings(rr, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body)))
+		if rr.Code != 200 {
+			t.Fatalf("save failed: %s", rr.Body)
+		}
+		saved, _ := s.GetSetting("notifications")
+		var got struct {
+			Minutes int `json:"reset_soon_minutes"`
+		}
+		if err := json.Unmarshal([]byte(saved), &got); err != nil || got.Minutes != 30 {
+			t.Fatalf("lead time not preserved: %s", saved)
+		}
+	}
+	for _, invalid := range []string{"0", "1441", "-1"} {
+		rr := httptest.NewRecorder()
+		h.UpdateSettings(rr, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"notifications":{"warning_threshold":80,"critical_threshold":95,"reset_soon_minutes":`+invalid+`}}`)))
+		if rr.Code != 400 {
+			t.Fatalf("invalid lead time accepted: %s", invalid)
+		}
+	}
+}
