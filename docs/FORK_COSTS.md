@@ -1,171 +1,87 @@
-# Subscription costs and quota value
+# Costs in the dashboard
 
-Connected Codex accounts appear automatically after the first usage reading.
-OnWatch detects the reported plan and applies public list-price estimates.
-No subscription entry, model prices or token collector is required. Prices
-follow subsequent plan changes rather than becoming saved overrides.
+Usage stays first. A small **Cost** section follows each account's usage.
+The overall view shows the monthly total across accounts and their combined
+weekly value used. Selecting an account shows only that account's costs.
 
-Canada is the default. The dashboard shows CAD first and USD underneath.
-Exact Canadian checkout amounts could not be verified from the public pricing
-page, so automatic CAD values use the dated Bank of Canada conversion and are
-explicitly labelled as estimates, not localized Canadian subscription prices.
+Connected Codex plans fill in automatically. A Plus account uses USD20/month;
+with an exchange rate of 1.4021, that is about CAD28.04. Two Plus accounts total
+USD40/month, about CAD56.08. Money is rounded to cents.
 
-The price catalog was checked on October 22, 2026 against the
-[ChatGPT pricing page](https://chatgpt.com/pricing/),
-[Plus pricing](https://help.openai.com/en/articles/6950777),
-[Pro tiers](https://help.openai.com/en/articles/9793128) and
-[Business seats](https://help.openai.com/en/articles/8792828).
-It ships with the app; it does not scrape billing pages on each refresh.
+## Automatic prices and CAD
+
+Canada is the default, with CAD first and USD underneath. The fixed USD
+reference prices checked on October 22, 2026 are:
 
 | Reported Codex plan | Monthly USD reference |
 | --- | --- |
 | Free | 0 |
 | Plus | 20 |
-| Pro Lite (`prolite`) | 100 |
-| Pro Max (`promax`) | 500 |
-| Pro (`pro`) | 100–500, exact billing tier unreported |
-| Business / Team | 20–125 per seat, billing and seat tier unreported |
+| Pro Lite | 100 |
+| Pro | 200 |
+| Pro Max | 500 |
+| Business / Team | 20 per Standard seat, annual billing equivalent |
 
-Business Standard is USD20 per month equivalent when billed annually or USD25
-when billed monthly. Premium is USD100 or USD125 respectively. The quota API
-does not identify these choices, so the app keeps their range visible in both
-totals and quota allocations. Business totals count connected seats, not the
-whole workspace. Enterprise, unknown plans and Claude's unreported tier remain
-unpriced and are excluded from totals, which are marked partial.
+Sources: [ChatGPT pricing](https://chatgpt.com/pricing/),
+[Plus](https://help.openai.com/en/articles/6950777),
+[Pro tiers](https://help.openai.com/en/articles/9793128), and
+[Business seats](https://help.openai.com/en/articles/8792828).
+These are plan references, not invoice reconciliation. For Business, monthly
+billing or a Premium seat costs more; the automatic reference assumes a
+Standard seat billed annually. Unknown and Enterprise prices remain unavailable.
+Claude quota responses do not identify the plan, so an optional override is
+needed for its subscription price. Unpriced accounts make totals partial.
 
-For optional corrections, open **Settings → General → Costs → Add price override**.
-Choose the account and enter the amount paid. Overrides take priority without
-double-counting the automatic estimate. Remove an override to return to plan
-detection. For an annual subscription, enter the monthly equivalent (annual
-fee ÷ 12). The single Claude connection uses provider `anthropic`, account
-`default`. Save with **Save Settings**.
+CAD uses the dated [Bank of Canada daily rate](https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates/).
+It is a conversion estimate rather than a Canadian checkout price. Taxes,
+discounts and card charges are not inferred. Rates are reused for 24 hours and
+persist across restarts. On failure, the last successful rate is retained;
+without one, USD remains available. Failed lookups back off for an hour.
 
-The dashboard automatically calculates monthly and annualized fees, daily
-allocations, and the estimated share of the fee used in the current 5-hour and
-weekly quota windows. None of these calculations requires token telemetry or
-model prices. Subscription fees for other providers can also be recorded;
-quota allocations currently support Codex and the single Claude connection.
+For a different amount, open **Settings → General → Costs → Add price override**.
+Choose the linked account and enter the monthly amount. An actual CAD fee takes
+priority over conversion. Removing the override returns to automatic pricing.
+An optional CAD-per-USD setting overrides the daily rate. No fee entry is
+required for supported Codex plans.
 
-## USD and CAD
+## Used this week
 
-You can enter the **actual monthly CAD fee** for each subscription. For example,
-USD20 and an actual CAD30 fee produce monthly totals of USD20/CAD30 and annualized
-totals of USD240/CAD360. An entered CAD fee is used as-is, including any taxes,
-card fees or conversion charges you include in that number.
-
-Without an entered CAD fee, OnWatch converts USD using the latest published
-[Bank of Canada daily USD/CAD rate](https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates/).
-The dashboard shows the source and observation date. This is a reference
-conversion, not your card's settlement rate. A configured **CAD per USD** rate
-can override it. For example, a planning rate of 1.5 converts USD20 to CAD30.
-This configured rate is not presented as a live market rate.
-
-The automatic rate is fetched from a fixed public Bank of Canada endpoint with
-a three-second timeout. Successful rates are saved across restarts and reused
-for 24 hours. Failed lookups back off for an hour and retain the last successful
-rate. Rates cached for over 48 hours are labelled as older cached rates. If no
-rate has ever been received, CAD conversions remain unavailable; USD values and
-entered CAD fees still work. No lookup is needed when every subscription has
-an entered CAD fee and no token model rates are configured.
-
-## Billing periods and quota allocations
-
-The allocation period defaults to the first of the month. The actual renewal
-day is not reported by the quota API. An optional billing-day override can be
-set from 1 to 31.
-Dates are interpreted in UTC. Days absent from a month clamp to its last day:
-a billing day of 31 produces January 31 to February 28, then February 28 to
-March 31 in a non-leap year. The dashboard shows the exact period used.
-
-Daily allocation is the monthly fee divided by the number of days in the
-current billing period. Annualized fees are the current monthly fee × 12;
-they are not a prediction of future prices or exchange rates.
-
-Quota value uses this explicit planning assumption:
+This is subscription value used, not an additional bill or API token spend.
+It follows the weekly value approach found in Tokaware's published dashboard:
 
 ```text
-window allocation = monthly fee × window duration ÷ billing-period duration
-used allocation = window allocation × reported quota percentage ÷ 100
-remaining allocation = window allocation - used allocation
+weekly plan value = monthly fee × 12 ÷ 52
+weekly value used = weekly plan value × weekly quota used ÷ 100
 ```
 
-For a 30-day billing period, a USD20/CAD30 subscription assigns USD4.6667/CAD7
-to a seven-day window. At 50% weekly utilization, the allocated fee used is
-USD2.3333/CAD3.50. A five-hour window uses the same formula with five hours.
-Five-hour and weekly limits overlap, so their values must not be added.
-These numbers are neither actual API spend nor extra charges, and do not mean
-the provider sells quota at those rates. The subscription remains a fixed fee.
+For Plus at USD20/month and 50% weekly usage, this is about USD2.31 of weekly
+subscription value. At a CAD28.04 monthly reference, it is about CAD3.24.
+Each account is calculated separately, then combined for the overall total.
+The five-hour session is not added. When several weekly model windows overlap,
+the highest valid weekly percentage is used once rather than summing windows.
 
-Only the current reported windows are valued. A reset changes the current
-window's utilization; it does not add a subscription charge. Missing account
-matches, readings older than 15 minutes, expired windows and invalid usage
-remain explicitly unavailable. The original observation time is shown. Account
-matching is exact; `codex` and `openai` both refer to saved Codex accounts.
+Missing, expired or stale readings show as unavailable. A known zero remains
+zero. The subscription fee stays visible when usage is unavailable. The weekly
+value resets with the provider's weekly quota; it is not cumulative monthly
+spend. Costs update after usage changes without refreshing the page.
 
-## Advanced: API-equivalent token costs
+The API also retains the earlier `windows` allocation fields for compatibility.
+The dashboard uses the new `weekly` value, which is independent of month length.
 
-The separate token-cost view remains available under an expandable Advanced
-section. It estimates received telemetry at configured model prices and does
-not affect subscription or quota allocation calculations.
+## API token value
 
-Add model rates using the exact provider and model ID in your token telemetry.
-Enter USD per million regular input, cached input and output tokens. Use your
-provider's current prices or your own contracted rates. No default prices are
-assumed. An explicit zero means a free rate. Save with **Save Settings**.
-Changing a model rate recalculates all retained telemetry at that rate; these
-estimates are not an immutable billing ledger. Taxes, discounts, batch rates,
-tool fees and other charges are not calculated.
+Received token telemetry is priced separately in a collapsed **API token value**
+section. It is filtered to the selected account. Subscription quota percentages
+do not provide token counts or a model-by-model API bill.
 
-The dashboard separates subscription allocations from API-equivalent token
-cost for received telemetry in the current UTC month. It shows account/model
-breakdowns, unknown pricing and partial totals. API-equivalent cost is a
-reference for token value, not an additional charge on top of a subscription.
-Only retained, ingested events are counted. Existing reported `cost_usd` values
-remain available through API Integrations and are not added to this estimate.
+Use the existing [API Integrations collector](API_INTEGRATIONS_SETUP.md) to supply
+request telemetry. Configure exact provider/model prices under
+**Settings → General → Costs → Advanced: API-equivalent model rates**. Prices
+are USD per million regular input, cached input and output tokens. Input totals
+include cached tokens. Missing cache counts remain unpriced when cached and
+regular rates differ; explicit zero means free. Totals cover retained events in
+the current UTC month, with results above 500 account/model groups marked partial.
 
-## Supplying usage
-
-Quota endpoints for connected Codex and Claude accounts do not contain token
-counts or per-model token spend. Connecting an account therefore does not
-populate token costs. OnWatch does not read your workstation session files
-through the quota connection or access Tokaware's data.
-
-Use the existing [API Integrations collector](API_INTEGRATIONS_SETUP.md) to
-supply per-request JSONL telemetry in its configured directory. In Docker the
-default is `/data/api-integrations`. Your application or collector must write
-these events where OnWatch can read them; do not place credentials or prompt
-contents in the event stream. Example with made-up token counts:
-
-```json
-{"ts":"2026-10-22T18:00:00Z","integration":"coding","provider":"openai","account":"personal","model":"your-model-id","request_id":"unique-request-id","prompt_tokens":1000,"completion_tokens":50,"metadata":{"cached_prompt_tokens":200}}
-```
-
-`prompt_tokens` includes cached input tokens. `metadata.cached_prompt_tokens`
-records how many input tokens were cache hits, including an explicit `0` when
-there were none. It must be an integer between zero and `prompt_tokens`.
-Missing or invalid cache counts leave the account/model group unpriced when
-regular and cached input prices differ. If both rates are equal, cache counts
-do not affect the total. Provider and model matching is exact and case
-sensitive. Use `openai` for Codex token telemetry and `anthropic` for Claude.
-Token events must contain the actual model used; a quota account alone cannot
-identify it. This limitation concerns API-equivalent pricing, not the
-subscription-based allocations above.
-
-The calculation is:
-
-```text
-((input_tokens - cached_input_tokens) × regular_input_rate
- + cached_input_tokens × cached_input_rate
- + output_tokens × output_rate) / 1,000,000
-```
-
-The collector's existing validation, deduplication and retention rules still
-apply. The cost dashboard refreshes once per minute while visible. It reads up
-to 500 account/model groups; larger results are explicitly marked partial.
-Unknown prices and missing telemetry never appear as a confirmed zero cost.
-[Tokaware](https://tokaware.com/for/finance) distinguishes subscription seat fees
-from token value and provider bills. [CodexLB](https://soju06.github.io/codex-lb/usage-reporting/)
-calculates API-equivalent costs from observed request tokens and model prices.
-Their published approaches informed this separation. No third-party source
-code is copied here; OnWatch does not duplicate their desktop collectors,
-proxy routing or billing connectors.
+The [Tokaware inspection notes](FORK_COST_RESEARCH.md) record the published
+artifacts examined with REA and the limits of that inspection. No Tokaware
+source code or assets are included in OnWatch.

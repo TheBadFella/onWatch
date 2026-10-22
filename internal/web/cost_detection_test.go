@@ -47,10 +47,13 @@ func TestCostAutomaticPlansAndOverrides(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Monthly != 40 || got.Maximum != 145 || got.CAD != 60 || got.MaxCAD != 217.5 || got.Currency != "CAD" || len(got.Values) != 2 || len(got.Unknown) != 1 {
+	if got.Monthly != 40 || got.Maximum != 40 || got.CAD != 60 || got.MaxCAD != 60 || got.Currency != "CAD" || len(got.Values) != 2 || len(got.Unknown) != 1 {
 		t.Fatal(rr.Body)
 	}
 	for _, value := range got.Values {
+		if value.AccountID == 0 || value.Weekly == nil || value.Weekly.UsedUSD < 2.30769 || value.Weekly.UsedUSD > 2.30770 {
+			t.Fatal("incorrect account weekly value", value)
+		}
 		if len(value.Windows) != 1 {
 			t.Fatal("automatic plan has no quota value", value)
 		}
@@ -88,10 +91,58 @@ func TestCostPlanCatalogUnknownIsNotFree(t *testing.T) {
 	for _, tc := range []struct {
 		plan      string
 		low, high float64
-	}{{"free", 0, 0}, {" PLUS ", 20, 20}, {"pro", 100, 500}, {"prolite", 100, 100}, {"promax", 500, 500}, {"team", 20, 125}} {
+	}{{"free", 0, 0}, {" PLUS ", 20, 20}, {"pro", 200, 200}, {"prolite", 100, 100}, {"promax", 500, 500}, {"team", 20, 20}} {
 		low, high, _, ok := codexSubscriptionPrice(tc.plan)
 		if !ok || low != tc.low || high != tc.high {
 			t.Fatal(tc, low, high, ok)
 		}
+	}
+}
+
+func TestCostCacheRefreshesAfterProviderPoll(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := NewHandler(s, nil, nil, nil, createTestConfigWithSynthetic())
+	a, err := s.CreateOrRestoreProviderAccount("codex", "live-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSetting("costs", `{"cad_per_usd":1.5}`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	reset := now.Add(time.Hour)
+	write := func(percent float64, captured time.Time) {
+		t.Helper()
+		if _, err := s.InsertCodexSnapshot(&api.CodexSnapshot{AccountID: a.ID, CapturedAt: captured, PlanType: "plus", Quotas: []api.CodexQuota{{Name: "seven_day", Utilization: percent, ResetsAt: &reset}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() float64 {
+		t.Helper()
+		rr := cachedCall(h, h.Costs, "/api/costs")
+		var got struct {
+			Values []subscriptionValue `json:"subscription_values"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil || len(got.Values) != 1 || got.Values[0].Weekly == nil {
+			t.Fatal(rr.Body)
+		}
+		return got.Values[0].Weekly.UsedPercent
+	}
+	write(25, now)
+	if read() != 25 {
+		t.Fatal("first reading missing")
+	}
+	write(75, now.Add(time.Second))
+	if read() != 25 {
+		t.Fatal("fixture must exercise the cached route")
+	}
+	// This is the invalidation wired by SetPollStatusRegistry after provider polls.
+	h.responses.notePoll("codex")
+	if read() != 75 {
+		t.Fatal("weekly cost kept the old quota after a provider poll")
 	}
 }

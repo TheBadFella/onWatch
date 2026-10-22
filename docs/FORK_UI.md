@@ -223,12 +223,11 @@ this version reset does not downgrade or reset stored usage.
 See [cost tracking](FORK_COSTS.md) for monthly subscriptions and API-equivalent
 estimates. Quota percentages cannot establish token spend.
 
-## Subscription-based value calculations
+## Account costs
 
-From fork 1.0.2, **Settings → General → Costs** calculates monthly, annualized
-and daily subscription fees in USD/CAD, plus separate current-window quota
-allocations for linked Codex and Claude accounts. Codex plans and reference
-prices appear automatically, with CAD first and price ranges for unreported
-billing tiers. Price overrides are optional; Claude's unreported plan needs an
-override for pricing. Token telemetry and model prices are only needed for the separate Advanced API-cost
-view. See [cost setup and allocation assumptions](FORK_COSTS.md).
+From fork 1.0.3, usage stays first. A compact Cost section sits below each
+account's usage, with one monthly total after the account cards. Selecting an
+account scopes both subscription and token value to that account. Plus uses
+USD20/month, about CAD28 at the current conversion rate. Weekly value follows
+the used share of the plan's weekly fee; it is not an extra bill. Details and
+optional overrides are in the [cost guide](FORK_COSTS.md).

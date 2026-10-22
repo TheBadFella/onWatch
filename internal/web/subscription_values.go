@@ -27,6 +27,7 @@ func (h *Handler) costAccounts() []costAccount {
 type subscriptionValue struct {
 	Provider      string       `json:"provider"`
 	Account       string       `json:"account"`
+	AccountID     int64        `json:"account_id,omitempty"`
 	MonthlyUSD    float64      `json:"monthly_usd"`
 	MonthlyMaxUSD *float64     `json:"monthly_max_usd,omitempty"`
 	MonthlyMaxCAD *float64     `json:"monthly_max_cad,omitempty"`
@@ -42,6 +43,7 @@ type subscriptionValue struct {
 	ObservedAt    *time.Time   `json:"observed_at,omitempty"`
 	Reason        string       `json:"reason,omitempty"`
 	Windows       []quotaValue `json:"windows"`
+	Weekly        *quotaValue  `json:"weekly,omitempty"`
 }
 type quotaValue struct {
 	Key          string     `json:"key"`
@@ -138,6 +140,7 @@ func (h *Handler) subscriptionValues(c costSettings, fx *costExchange, now time.
 		case "codex":
 			for _, a := range accounts {
 				if a.Name == s.Account {
+					item.AccountID = a.ID
 					if snapshot, err := h.store.QueryLatestCodex(a.ID); err == nil && snapshot != nil {
 						quotas = snapshot.Quotas
 						captured = snapshot.CapturedAt
@@ -165,6 +168,14 @@ func (h *Handler) subscriptionValues(c costSettings, fx *costExchange, now time.
 				for _, q := range quotas {
 					if value := quotaAllocation(q, item.MonthlyUSD, item.MonthlyCAD, end.Sub(start), now); value != nil {
 						item.Windows = append(item.Windows, *value)
+					}
+					if strings.HasPrefix(q.Name, "seven_day") {
+						q.Name = "seven_day"
+						// One weekly value per account. Overlapping model windows are not added.
+						value := quotaAllocation(q, item.MonthlyUSD, item.MonthlyCAD, 52*7*24*time.Hour/12, now)
+						if value != nil && (item.Weekly == nil || value.UsedPercent > item.Weekly.UsedPercent) {
+							item.Weekly = value
+						}
 					}
 				}
 				if len(item.Windows) == 0 {

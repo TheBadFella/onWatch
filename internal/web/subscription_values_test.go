@@ -62,7 +62,7 @@ func TestSubscriptionValuesWithoutTokenTelemetry(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	reset := now.Add(time.Hour)
-	snapshot := &api.CodexSnapshot{AccountID: account.ID, CapturedAt: now, Quotas: []api.CodexQuota{{Name: "five_hour", Utilization: 50, ResetsAt: &reset}, {Name: "seven_day", Utilization: 75, ResetsAt: &reset}}}
+	snapshot := &api.CodexSnapshot{AccountID: account.ID, CapturedAt: now, Quotas: []api.CodexQuota{{Name: "five_hour", Utilization: 50, ResetsAt: &reset}, {Name: "seven_day", Utilization: 75, ResetsAt: &reset}, {Name: "seven_day_sonnet", Utilization: 80, ResetsAt: &reset}, {Name: "seven_day_opus", Utilization: 99, ResetsAt: &now}}}
 	if _, err := s.InsertCodexSnapshot(snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +86,14 @@ func TestSubscriptionValuesWithoutTokenTelemetry(t *testing.T) {
 	if result.MonthlyUSD != 20 || result.AnnualUSD != 240 || result.MonthlyCAD != 30 || result.AnnualCAD != 360 || len(result.Values) != 1 || len(result.Values[0].Windows) != 2 {
 		t.Fatal(rr.Body)
 	}
+	if result.Values[0].AccountID != account.ID || result.Values[0].Weekly == nil || result.Values[0].Weekly.UsedPercent != 80 || math.Abs(result.Values[0].Weekly.UsedUSD-20*12.0/52*.8) > 1e-9 {
+		t.Fatal("weekly windows were added, expired usage included, or account identity lost", result.Values[0])
+	}
 	if result.Values[0].CADSource != "Entered CAD fee" {
 		t.Fatal("actual CAD fee was replaced by FX conversion")
 	}
 	future := h.subscriptionValues(config, nil, now.Add(16*time.Minute))
-	if len(future[0].Windows) != 0 || !strings.Contains(future[0].Reason, "stale") {
+	if future[0].Weekly != nil || len(future[0].Windows) != 0 || !strings.Contains(future[0].Reason, "stale") {
 		t.Fatal("stale reading became current value")
 	}
 	config.Subscriptions[0].Account = "different-account"
