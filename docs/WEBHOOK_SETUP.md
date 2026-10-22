@@ -173,3 +173,18 @@ steady state and at most one per newly crossed threshold.
 | `/api/settings` | PUT | Save webhook config under the `webhook` key |
 | `/api/settings` | GET | Read config back; the bearer token is masked as `bearer_token_set` |
 | `/api/settings/webhook/test` | POST | Send a test payload (10 second cooldown) |
+
+### Fork reset context and Discord presentation
+
+This fork keeps the existing event names and adds optional `account_name` and
+`reset` fields to quota notifications. The `reset` object contains `cause`,
+`evidence`, `observedAt`, `previousResetAt`, `nextResetAt`, and recorded usage
+percentages when available. Causes are `scheduled`, `banked_credit`,
+`early_unknown`, or `unknown`. Consumers should tolerate absent fields.
+
+Discord destinations receive compact embeds with account names, human-readable
+limit labels and local timestamps. Reset wording separates observed credit
+redemption from a reset that happened before its due date without a known cause.
+Generic endpoints continue receiving JSON; use `event`, rather than matching
+notification title text, to route alerts. See [reset reporting](FORK_UI.md#reset-reporting-and-readable-alerts)
+for evidence rules and upgrade behavior.

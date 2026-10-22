@@ -71,6 +71,8 @@ type QuotaStatus struct {
 	Provider      string
 	QuotaKey      string
 	AccountID     string // For multi-account providers (e.g., Codex)
+	AccountName   string
+	Reset         *store.CodexResetObservation
 	Utilization   float64
 	Limit         float64
 	ResetOccurred bool
@@ -497,6 +499,28 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 	}
 }
 
+// CheckCodexReset attaches persisted observations to the account-scoped reset.
+func (e *NotificationEngine) CheckCodexReset(accountID int64, quotaName string) {
+	status := QuotaStatus{Provider: "codex", AccountID: fmt.Sprintf("%d", accountID), QuotaKey: quotaName, ResetOccurred: true}
+	if observations, err := e.store.QueryCodexResetObservations(accountID, 20); err == nil {
+		for _, observation := range observations {
+			if observation.QuotaName == quotaName {
+				status.Reset = &observation
+				if observation.AfterPercent != nil {
+					status.Utilization = *observation.AfterPercent
+				}
+				if observation.NextResetAt != nil {
+					status.ResetAt = *observation.NextResetAt
+				}
+				break
+			}
+		}
+	} else {
+		e.logger.Warn("Could not load Codex reset evidence", "error", err, "account_id", accountID)
+	}
+	e.Check(status)
+}
+
 // SendTestEmail sends a test email to verify SMTP configuration.
 func (e *NotificationEngine) SendTestEmail() error {
 	e.mu.RLock()
@@ -582,6 +606,7 @@ func (e *NotificationEngine) sendNotification(channels channelSet, policy repeat
 		}
 	}
 
+	status.AccountName = e.accountName(status.Provider, status.AccountID)
 	subject := e.buildSubject(status, notifType)
 	body := e.buildBody(status, notifType)
 	sent := false
@@ -676,33 +701,46 @@ func titleCase(s string) string {
 
 // buildSubject creates the email subject line.
 func (e *NotificationEngine) buildSubject(status QuotaStatus, notifType string) string {
+	context := providerLabel(status.Provider)
+	if status.AccountName != "" {
+		context += " | " + status.AccountName
+	}
+	quota := quotaLabel(status.QuotaKey)
 	switch notifType {
-	case "critical":
-		return fmt.Sprintf("[CRITICAL] %s quota %s at %.1f%%",
-			titleCase(status.Provider), status.QuotaKey, status.Utilization)
-	case "warning":
-		return fmt.Sprintf("[WARNING] %s quota %s at %.1f%%",
-			titleCase(status.Provider), status.QuotaKey, status.Utilization)
-	case "reset":
-		return fmt.Sprintf("[RESET] %s quota %s has been reset",
-			titleCase(status.Provider), status.QuotaKey)
+	case EventCritical:
+		return fmt.Sprintf("[CRITICAL] %s | %s at %.1f%%", context, quota, status.Utilization)
+	case EventWarning:
+		return fmt.Sprintf("[WARNING] %s | %s at %.1f%%", context, quota, status.Utilization)
+	case EventReset:
+		cause := "Reset detected"
+		if status.Reset != nil {
+			cause = resetCauseLabel(status.Reset.Cause)
+		}
+		return fmt.Sprintf("%s | %s | %s", context, quota, cause)
 	default:
-		return fmt.Sprintf("[%s] %s quota %s", notifType, status.Provider, status.QuotaKey)
+		return fmt.Sprintf("%s | %s", context, quota)
 	}
 }
 
-// buildBody creates the email body text.
 func (e *NotificationEngine) buildBody(status QuotaStatus, notifType string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Provider: %s\n", status.Provider))
-	sb.WriteString(fmt.Sprintf("Quota: %s\n", status.QuotaKey))
-	sb.WriteString(fmt.Sprintf("Utilization: %.1f%%\n", status.Utilization))
-	if status.Limit > 0 {
-		sb.WriteString(fmt.Sprintf("Limit: %.0f\n", status.Limit))
+	if notifType == EventReset {
+		sb.WriteString(resetMessage(status) + "\n\n")
 	}
-	sb.WriteString(fmt.Sprintf("Alert Type: %s\n", notifType))
-	sb.WriteString(fmt.Sprintf("Time: %s\n", time.Now().UTC().Format(time.RFC3339)))
-	sb.WriteString("\n-- Sent by onWatch")
+	fmt.Fprintf(&sb, "Provider: %s\n", providerLabel(status.Provider))
+	if status.AccountName != "" {
+		fmt.Fprintf(&sb, "Account: %s\n", status.AccountName)
+	}
+	fmt.Fprintf(&sb, "Limit: %s\n", quotaLabel(status.QuotaKey))
+	if status.Reset != nil {
+		fmt.Fprintf(&sb, "Usage: %s\nPrevious due time: %s\nNext due time: %s\nObserved: %s\n", usageChange(status.Reset.BeforePercent, status.Reset.AfterPercent), notificationTime(status.Reset.PreviousResetAt), notificationTime(status.Reset.NextResetAt), status.Reset.ObservedAt.UTC().Format(time.RFC3339))
+	} else if notifType != EventReset {
+		fmt.Fprintf(&sb, "Usage: %.1f%% used\n", status.Utilization)
+	}
+	if !status.ResetAt.IsZero() && status.Reset == nil {
+		fmt.Fprintf(&sb, "Next reset: %s\n", notificationTime(&status.ResetAt))
+	}
+	sb.WriteString("\nOnWatch")
 	return sb.String()
 }
 
@@ -769,12 +807,13 @@ func (e *NotificationEngine) SendAuthErrorNotification(alert AuthErrorAlert) boo
 
 	// Send via webhook if enabled and configured
 	if channels.deliverWebhook(e.logger, WebhookPayload{
-		Event:     EventAuthError,
-		Provider:  normalizeNotificationProvider(alert.Provider),
-		AccountID: alert.AccountID,
-		Title:     subject,
-		Message:   alert.Message,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Event:       EventAuthError,
+		Provider:    normalizeNotificationProvider(alert.Provider),
+		AccountID:   alert.AccountID,
+		AccountName: e.accountName(alert.Provider, alert.AccountID),
+		Title:       subject,
+		Message:     alert.Message,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}) {
 		sent = true
 	}
@@ -881,17 +920,21 @@ func (c channelSet) deliverWebhook(logger *slog.Logger, payload WebhookPayload) 
 // webhookPayloadForQuota builds the JSON payload for a quota threshold or reset event.
 func webhookPayloadForQuota(status QuotaStatus, event, title, message string, threshold float64) WebhookPayload {
 	payload := WebhookPayload{
-		Event:     event,
-		Provider:  normalizeNotificationProvider(status.Provider),
-		QuotaKey:  status.QuotaKey,
-		AccountID: status.AccountID,
-		Title:     title,
-		Message:   message,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Event:       event,
+		Provider:    normalizeNotificationProvider(status.Provider),
+		QuotaKey:    status.QuotaKey,
+		AccountID:   status.AccountID,
+		AccountName: status.AccountName,
+		Reset:       status.Reset,
+		Title:       title,
+		Message:     message,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	utilization := status.Utilization
-	payload.Utilization = &utilization
+	if event != EventReset || status.Reset != nil && status.Reset.AfterPercent != nil {
+		payload.Utilization = &utilization
+	}
 	if status.Limit > 0 {
 		limit := status.Limit
 		payload.Limit = &limit
@@ -985,30 +1028,36 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 	}
 
 	provider := normalizeNotificationProvider(ev.Provider)
-	title := fmt.Sprintf("[QUOTA STARTER] %s %s ping failed", titleCase(provider), ev.QuotaKey)
+	account := e.accountName(provider, ev.AccountID)
+	context := providerLabel(provider)
+	if account != "" {
+		context += " | " + account
+	}
+	title := fmt.Sprintf("[QUOTA STARTER] %s %s ping failed", context, quotaLabel(ev.QuotaKey))
 	message := "The auto quota-starter ping did not complete."
 	if ev.Success {
-		title = fmt.Sprintf("[QUOTA STARTER] %s %s window started", titleCase(provider), ev.QuotaKey)
-		message = "The auto quota-starter ping started a new limit window."
+		title = fmt.Sprintf("[QUOTA STARTER] %s %s window started", context, quotaLabel(ev.QuotaKey))
+		message = "OnWatch sent a small starter request to start the limit window. This is separate from the usage reset."
 	}
 	if ev.Detail != "" {
 		message = message + " " + ev.Detail
 	}
 
 	payload := WebhookPayload{
-		Event:     event,
-		Provider:  provider,
-		QuotaKey:  ev.QuotaKey,
-		AccountID: ev.AccountID,
-		Title:     title,
-		Message:   message,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Event:       event,
+		Provider:    provider,
+		QuotaKey:    ev.QuotaKey,
+		AccountID:   ev.AccountID,
+		AccountName: account,
+		Title:       title,
+		Message:     message,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if channels.emailEnabled(event) {
 		body := message
 		if ev.AccountID != "" {
-			body += "\nAccount: " + ev.AccountID
+			body += "\nAccount: " + account
 		}
 		if err := channels.mailer.Send(title, body); err != nil {
 			e.logger.Error("failed to send quota-starter email", "error", err, "event", event)
@@ -1097,14 +1146,15 @@ func (e *NotificationEngine) SendResetCreditExpiryNotification(alert ResetCredit
 		}
 	}
 	if channels.deliverWebhook(e.logger, WebhookPayload{
-		Event:     EventResetCreditExpiry,
-		Provider:  "codex",
-		QuotaKey:  alert.CreditID,
-		AccountID: alert.AccountID,
-		ResetAt:   alert.ExpiresAt.UTC().Format(time.RFC3339),
-		Title:     subject,
-		Message:   message,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Event:       EventResetCreditExpiry,
+		Provider:    "codex",
+		QuotaKey:    alert.CreditID,
+		AccountID:   alert.AccountID,
+		AccountName: account,
+		ResetAt:     alert.ExpiresAt.UTC().Format(time.RFC3339),
+		Title:       subject,
+		Message:     message,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}) {
 		sent = true
 	}

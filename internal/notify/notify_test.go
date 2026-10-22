@@ -1144,13 +1144,13 @@ func TestBuildSubject(t *testing.T) {
 			"reset",
 			QuotaStatus{Provider: "synthetic", QuotaKey: "monthly"},
 			"reset",
-			"[RESET]",
+			"Reset detected",
 		},
 		{
 			"unknown type",
 			QuotaStatus{Provider: "custom", QuotaKey: "test"},
 			"info",
-			"[info]",
+			"Custom | test",
 		},
 	}
 
@@ -1178,23 +1178,10 @@ func TestBuildBody(t *testing.T) {
 		Limit:       100,
 	}, "warning")
 
-	if !strings.Contains(body, "Provider: anthropic") {
-		t.Error("Body should contain provider name")
-	}
-	if !strings.Contains(body, "Quota: five_hour") {
-		t.Error("Body should contain quota key")
-	}
-	if !strings.Contains(body, "82.5%") {
-		t.Error("Body should contain utilization percentage")
-	}
-	if !strings.Contains(body, "Limit: 100") {
-		t.Error("Body should contain limit")
-	}
-	if !strings.Contains(body, "Alert Type: warning") {
-		t.Error("Body should contain alert type")
-	}
-	if !strings.Contains(body, "-- Sent by onWatch") {
-		t.Error("Body should contain footer")
+	for _, fragment := range []string{"Provider: Claude", "Limit: 5-hour limit", "Usage: 82.5% used", "OnWatch"} {
+		if !strings.Contains(body, fragment) {
+			t.Errorf("body missing %q: %s", fragment, body)
+		}
 	}
 }
 
@@ -1212,7 +1199,7 @@ func TestBuildBody_NoLimit(t *testing.T) {
 		Limit:       0,
 	}, "warning")
 
-	if strings.Contains(body, "Limit:") {
+	if strings.Contains(body, "Limit: 0") {
 		t.Error("Body should not contain limit when limit is 0")
 	}
 }

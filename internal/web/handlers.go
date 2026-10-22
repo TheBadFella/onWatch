@@ -9700,6 +9700,11 @@ func (h *Handler) buildCodexCurrentOK(accountID int64) (response map[string]inte
 	}
 	hasData = true
 
+	if observations, err := h.store.QueryCodexResetObservations(accountID, 8); err == nil {
+		response["recentResets"] = observations
+	} else {
+		h.logger.Warn("Could not load Codex reset history", "error", err, "account_id", accountID)
+	}
 	response["capturedAt"] = latest.CapturedAt.Format(time.RFC3339)
 	// Snapshot age drives the dashboard's stale-card treatment: a polling-disabled
 	// or long-paused account keeps serving its last snapshot, which must not look

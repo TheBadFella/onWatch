@@ -142,3 +142,46 @@ that a usage threshold has fired. With repeats off, threshold alerts fire once
 per account, quota and cycle. Codex reset callbacks now preserve the account ID,
 so resetting one account clears its own alert history and leaves others alone.
 No existing alert history is deleted during the upgrade.
+
+## Reset reporting and readable alerts
+
+The Codex dashboard includes **Recent resets** below the account cards. The
+all-accounts view groups limits observed resetting together under each account.
+Selecting an account limits the history to that account. Expand an entry to see
+recorded usage before and after, the previous due date, the next due date, and
+the evidence used for classification. Dates follow your dashboard timezone.
+Existing cycle and usage records supply history after upgrading; no historical
+credit redemption is invented when older data lacks that evidence.
+
+- **Scheduled reset:** the observation matches or follows the previous due time,
+  allowing two minutes for polling and clock differences. This is a timing-based
+  classification, not an assertion about who triggered it.
+- **Banked reset used:** a previously available or redeeming credit was reported
+  as redeemed between the two usage samples. That confirms a redemption was
+  observed in the same interval; it does not identify the person who used it.
+- **Early reset, cause unconfirmed:** usage reset before the previous due time
+  without a confirmed credit redemption in that interval. The provider response
+  does not distinguish a provider-issued reset from another manual action.
+- **Cause unknown:** the previous deadline or surrounding usage samples were not
+  recorded, or a monitoring gap of more than five minutes prevents a reliable
+  comparison. A credit change across that gap does not establish this reset
+  used the credit.
+
+A falling credit count or a credit disappearing from the response is not enough
+to claim redemption. A credit already marked redeemed on first discovery has no
+known redemption time. Credit details are refreshed before reset classification
+when the normal refresh is due or the usage response reports a count change;
+this does not add a new polling loop or perform a reset.
+
+Discord alerts use account names, readable limit labels, grouped details, and
+Discord timestamps that adapt to the reader's timezone. Reset alerts include
+before/after usage and both deadlines. Window-start alerts explicitly describe
+the starter request as separate from resetting usage. Generic webhook event
+names and account IDs remain available; optional `account_name` and `reset`
+fields carry the extra context. Email uses the same readable reset explanation.
+Unknown usage is omitted rather than presented as a measured zero.
+
+The upgrade adds a nullable redemption-observation timestamp to stored credits.
+It keeps existing cycles and notification deduplication intact. Rolling back the
+image leaves that extra column in place; older builds ignore it. New formatting
+applies to future alerts and does not resend old Discord messages.

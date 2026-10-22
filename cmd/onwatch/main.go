@@ -1840,7 +1840,7 @@ func run() error {
 	}
 	if codexTr != nil {
 		codexTr.SetOnAccountReset(func(accountID int64, quotaName string) {
-			notifier.Check(notify.QuotaStatus{Provider: "codex", AccountID: fmt.Sprintf("%d", accountID), QuotaKey: quotaName, ResetOccurred: true})
+			notifier.CheckCodexReset(accountID, quotaName)
 		})
 	}
 	if antigravityTr != nil {

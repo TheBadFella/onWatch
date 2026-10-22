@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/onllm-dev/onwatch/v2/internal/store"
 )
 
 // Webhook delivery is deliberately synchronous: notifications are deduplicated
@@ -113,17 +115,19 @@ const (
 // WebhookPayload is the JSON body POSTed to the configured endpoint.
 // It carries no credentials: no OAuth tokens, API keys, or bearer tokens.
 type WebhookPayload struct {
-	Event       string   `json:"event"`
-	Provider    string   `json:"provider"`
-	QuotaKey    string   `json:"quota_key,omitempty"`
-	AccountID   string   `json:"account_id,omitempty"`
-	Utilization *float64 `json:"utilization,omitempty"`
-	Limit       *float64 `json:"limit,omitempty"`
-	Threshold   *float64 `json:"threshold,omitempty"`
-	ResetAt     string   `json:"reset_at,omitempty"`
-	Title       string   `json:"title"`
-	Message     string   `json:"message"`
-	Timestamp   string   `json:"timestamp"`
+	Event       string                       `json:"event"`
+	Provider    string                       `json:"provider"`
+	QuotaKey    string                       `json:"quota_key,omitempty"`
+	AccountID   string                       `json:"account_id,omitempty"`
+	AccountName string                       `json:"account_name,omitempty"`
+	Reset       *store.CodexResetObservation `json:"reset,omitempty"`
+	Utilization *float64                     `json:"utilization,omitempty"`
+	Limit       *float64                     `json:"limit,omitempty"`
+	Threshold   *float64                     `json:"threshold,omitempty"`
+	ResetAt     string                       `json:"reset_at,omitempty"`
+	Title       string                       `json:"title"`
+	Message     string                       `json:"message"`
+	Timestamp   string                       `json:"timestamp"`
 }
 
 // WebhookSender delivers notification payloads to a user-configured HTTP endpoint.
