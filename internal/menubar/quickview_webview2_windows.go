@@ -415,11 +415,7 @@ func (p *webView2Popover) configure() {
 	}
 	// Paint the page background before the document does, so opening the
 	// flyout never flashes white.
-	if controller := p.chromium.GetController(); controller != nil {
-		if controller2 := controller.GetICoreWebView2Controller2(); controller2 != nil {
-			_ = controller2.PutDefaultBackgroundColor(p.background())
-		}
-	}
+	p.applyBackground()
 	p.chromium.Init(webView2HostScript)
 }
 
@@ -446,8 +442,10 @@ func (p *webView2Popover) show() {
 		return
 	}
 	p.visible = true
-	// Re-fetch on the warm page instead of reloading it, as macOS does.
-	p.chromium.Eval("window.__onwatchMenubarRefresh && window.__onwatchMenubarRefresh()")
+	// Re-fetch on the warm page instead of reloading it, as macOS does. The
+	// show hook always issues a real, no-store summary fetch and coalesces
+	// with any in-flight request.
+	p.chromium.Eval("window.__onwatchMenubarShown && window.__onwatchMenubarShown()")
 	p.lastAutoHide = time.Time{}
 	hwnd := p.windowHandle()
 	_, _, _ = procShowWindow.Call(hwnd, swShow)
@@ -521,6 +519,24 @@ func (p *webView2Popover) onMessage(raw string) {
 		if externalURLAllowed(msg.URL) {
 			p.hide(false)
 			go openInBrowser(msg.URL)
+		}
+	case hostMessageTheme:
+		// The page's effective theme can differ from the OS; match the default
+		// background so a repaint never flashes the wrong color.
+		p.dark = msg.Theme == "dark"
+		p.applyBackground()
+	}
+}
+
+// applyBackground repaints the WebView default background for the current
+// theme. It is a no-op before the controller exists.
+func (p *webView2Popover) applyBackground() {
+	if p.chromium == nil {
+		return
+	}
+	if controller := p.chromium.GetController(); controller != nil {
+		if controller2 := controller.GetICoreWebView2Controller2(); controller2 != nil {
+			_ = controller2.PutDefaultBackgroundColor(p.background())
 		}
 	}
 }

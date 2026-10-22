@@ -26,6 +26,11 @@ of the chosen usage/available display mode. No cost estimates are inferred.
 
 ## Live usage updates
 
+The fork includes upstream v2.14.14, including Codex reset-credit reporting,
+Cursor usage fixes, provider polling status, and DeepSeek peak-hour information.
+Auto-start badges use a compact label. Table pagination stays in one horizontal
+row, scrolling within the footer when a narrow screen cannot fit every button.
+
 Visible dashboards check OnWatch's stored usage every five seconds. Provider
 requests remain in the background agent; opening extra tabs does not multiply
 those requests. History, insights, and visible tables refresh once per minute.

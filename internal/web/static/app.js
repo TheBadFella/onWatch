@@ -148,6 +148,7 @@ const State = {
   modalChart: null,
   countdownInterval: null,
   refreshInterval: null,
+  peakTickInterval: null,
   currentQuotas: {},
   // Table data caches
   allCyclesData: [],
@@ -659,11 +660,27 @@ function getCorrelatedKeys(key) {
   return related;
 }
 
+// One GET /api/settings per page load: init reads it for hidden insights, the
+// timezone and provider settings, which used to be three sequential round
+// trips before anything else could start. Any settings write clears it.
+let _settingsDataPromise = null;
+function getSettingsData() {
+  if (!_settingsDataPromise) {
+    _settingsDataPromise = authFetch(`${API_BASE}/api/settings`)
+      .then(res => (res.ok ? res.json() : null))
+      .catch(() => null);
+    _settingsDataPromise.then(data => { if (data === null) _settingsDataPromise = null; });
+  }
+  return _settingsDataPromise;
+}
+function invalidateSettingsData() {
+  _settingsDataPromise = null;
+}
+
 async function loadHiddenInsights() {
   try {
-    const res = await authFetch(`${API_BASE}/api/settings`);
-    if (res.ok) {
-      const data = await res.json();
+    const data = await getSettingsData();
+    if (data) {
       if (data.hidden_insights && Array.isArray(data.hidden_insights)) {
         State.hiddenInsights = new Set(data.hidden_insights);
       }
@@ -689,6 +706,7 @@ async function loadHiddenInsights() {
 
 async function saveHiddenInsights() {
   try {
+    invalidateSettingsData();
     await authFetch(`${API_BASE}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1339,113 +1357,24 @@ function getQuotaDisplayName(quotaKey, provider) {
 
 // ── Anthropic Dynamic Card Rendering ──
 
-// ── Anthropic Promo ──
+// ── Peak/off-peak chips ──
+// The schedule itself lives in peak-hours.js, shared with the menubar. These
+// three providers serve the DeepSeek models the schedule applies to.
 
-function isAnthropicPeakHours(promo) {
-  const now = new Date();
-  const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-  const et = new Date(etStr);
-  const hour = et.getHours();
-  const day = et.getDay();
-  const isWeekday = day >= 1 && day <= 5;
-  return promo.peakWeekdaysOnly ? (isWeekday && hour >= promo.peakStartHourET && hour < promo.peakEndHourET) : false;
+const peakProviderMeta = {
+  commandcode: { provider: 'commandcode', model_note: 'Command Code DeepSeek models', pricing: 'peak $0.30 / $1.20' },
+  opencode: { provider: 'opencode', model_note: 'DeepSeek V4.1 Flash / V4 Pro' },
+  deepseek: { provider: 'deepseek' }
+};
+
+function peakMetaForProvider(provider) {
+  return peakProviderMeta[provider] || null;
 }
 
-// Compute minutes until the next peak/off-peak transition in ET
-function promoMinutesUntilTransition(promo) {
-  const now = new Date();
-  const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-  const et = new Date(etStr);
-  const hour = et.getHours();
-  const min = et.getMinutes();
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  const isWeekday = day >= 1 && day <= 5;
-  const isPeak = promo.peakWeekdaysOnly ? (isWeekday && hour >= promo.peakStartHourET && hour < promo.peakEndHourET) : false;
-
-  let totalMin;
-  if (isPeak) {
-    // Currently peak - countdown to peak end (peakEndHourET today)
-    totalMin = (promo.peakEndHourET - hour - 1) * 60 + (60 - min);
-  } else if (isWeekday && hour < promo.peakStartHourET) {
-    // Before peak today - countdown to peak start
-    totalMin = (promo.peakStartHourET - hour - 1) * 60 + (60 - min);
-  } else {
-    // After peak on weekday, or weekend - countdown to next weekday peak start
-    let daysToAdd;
-    if (day === 5) daysToAdd = 3;      // Fri after peak -> Mon
-    else if (day === 6) daysToAdd = 2;  // Sat -> Mon
-    else if (day === 0) daysToAdd = 1;  // Sun -> Mon
-    else daysToAdd = 1;                 // Weekday after peak -> next day
-    totalMin = (daysToAdd - 1) * 1440 + (24 - hour - 1) * 60 + (60 - min) + promo.peakStartHourET * 60;
-  }
-
-  // Cap at promo end date if provided (empty string = ongoing, no cap).
-  if (promo.endsAt) {
-    const promoEnd = new Date(promo.endsAt);
-    if (!isNaN(promoEnd.getTime())) {
-      const promoEndMin = Math.floor((promoEnd - now) / 60000);
-      if (promoEndMin > 0 && promoEndMin < totalMin) totalMin = promoEndMin;
-    }
-  }
-
-  return Math.max(0, totalMin);
-}
-
-// Format minutes into a compact countdown string
-function formatPromoCountdown(minutes) {
-  if (minutes <= 0) return '';
-  if (minutes >= 1440) {
-    const d = Math.floor(minutes / 1440);
-    const h = Math.floor((minutes % 1440) / 60);
-    return h > 0 ? d + 'd ' + h + 'h' : d + 'd';
-  }
-  if (minutes >= 60) {
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
-  }
-  return minutes + 'm';
-}
-
-// Build the full promo label text with countdown.
-// Renders "Peak hours till <countdown to peak end>" or "Off-peak hours till
-// <countdown to next peak start>" so users always know how long the current
-// state lasts.
-function promoLabelWithCountdown(promo) {
-  const label = isAnthropicPeakHours(promo) ? 'Peak hours' : 'Off-peak hours';
-  const mins = promoMinutesUntilTransition(promo);
-  const countdown = formatPromoCountdown(mins);
-  return countdown ? label + ' till ' + countdown : label;
-}
-
-// Store current promo for card rendering
-let _anthropicPromo = null;
-
-function updateAnthropicPromoState(promo) {
-  _anthropicPromo = promo || null;
-  refreshPromoTags();
-  // Re-evaluate every 30s for countdown updates (no API call)
-  if (window._promoInterval) clearInterval(window._promoInterval);
-  if (_anthropicPromo) {
-    window._promoInterval = setInterval(refreshPromoTags, 30000);
-  }
-}
-
-function refreshPromoTags() {
-  document.querySelectorAll('.promo-tag-inline').forEach(el => {
-    if (!_anthropicPromo) { el.remove(); return; }
-    const isPeak = isAnthropicPeakHours(_anthropicPromo);
-    el.className = 'promo-tag-inline ' + (isPeak ? 'promo-peak' : 'promo-offpeak');
-    el.textContent = promoLabelWithCountdown(_anthropicPromo);
-  });
-}
-
-function promoTagHTML() {
-  if (!_anthropicPromo) return '';
-  const isPeak = isAnthropicPeakHours(_anthropicPromo);
-  const cls = isPeak ? 'promo-peak' : 'promo-offpeak';
-  const text = promoLabelWithCountdown(_anthropicPromo);
-  return `<a class="promo-tag-inline ${cls}" href="https://www.reddit.com/r/ClaudeAI/comments/1s4idaq/update_on_session_limits/" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="${escapeHTML(_anthropicPromo.description)}">${text}</a>`;
+function peakChipHTML(provider) {
+  const meta = peakMetaForProvider(provider);
+  if (!meta || !window.OnWatchPeak) return '';
+  return window.OnWatchPeak.peakChipMarkup(meta);
 }
 
 function renderAnthropicQuotaCards(quotas, containerId) {
@@ -1490,7 +1419,6 @@ function renderAnthropicQuotaCards(quotas, containerId) {
           <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${statusCfg.icon}"/></svg>
           ${statusCfg.label}
         </span>
-        ${promoTagHTML()}
         <span class="reset-time" id="${resetId}"${q.resetsAt ? ` data-reset-at="${q.resetsAt}"` : ''}>${q.resetsAt ? formatResetTime(q.resetsAt) : ''}</span>
       </footer>
     </article>`;
@@ -2582,10 +2510,13 @@ function renderBalanceCards(provider, balance, containerId) {
     const icon = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
     container.innerHTML = fields.map((field, i) => `<article class="quota-card balance-card" data-quota="${field.historyKey}" data-provider="${provider}" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
-        <h2 class="quota-title">
-          <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
-          ${field.label}
-        </h2>
+        <div class="quota-title-block">
+          <h2 class="quota-title">
+            <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
+            ${field.label}
+          </h2>
+          ${field.primary ? peakChipHTML(provider) : ''}
+        </div>
       </header>
       <div class="progress-stats">
         <span class="usage-percent" data-balance-amount></span>
@@ -2823,10 +2754,73 @@ function syncCodexAutoStartBadges() {
   });
 }
 
+// Banked reset credits (issue #152): a compact "1 reset" chip in the first
+// card header, styled like the peak chip and sharing its floating tooltip.
+// The count is available_count, the number the Codex CLI shows. The payload's
+// applicable count is narrower (usable right now) and reads 0 while a reset is
+// banked, so it is not used for the label. Zero or unknown shows nothing.
+function codexResetCreditsCount(rc) {
+  if (!rc || typeof rc.available_count !== 'number' || !isFinite(rc.available_count)) return 0;
+  return Math.max(0, Math.floor(rc.available_count));
+}
+
+function codexResetCreditsTipText(count, nextExpiresAt, expiryUnknown) {
+  let tip = count === 1 ? '1 banked reset' : `${count} banked resets`;
+  const ms = nextExpiresAt ? new Date(nextExpiresAt).getTime() - Date.now() : NaN;
+  if (isFinite(ms)) {
+    tip += ms <= 0 ? ' - next expires now' : ` - next expires in ${formatDuration(Math.floor(ms / 1000))}`;
+  } else if (expiryUnknown) {
+    tip += ' - expiry unknown';
+  }
+  return tip;
+}
+
+function codexResetCreditsTooltip(rc, count) {
+  const unknown = Array.isArray(rc.credits) && rc.credits.some(c => c.expiry_unknown);
+  return codexResetCreditsTipText(count, rc.next_expires_at, unknown);
+}
+
+// The chip re-renders only when its count changes, so the 30s ticker keeps
+// the expiry countdown in its tooltip current.
+function refreshResetChipTips(root) {
+  (root || document).querySelectorAll('.reset-chip-wrap[data-reset-count]').forEach(el => {
+    const count = parseInt(el.dataset.resetCount, 10) || 0;
+    if (count <= 0) return;
+    const tip = codexResetCreditsTipText(count, el.dataset.resetExpires || '', el.dataset.resetUnknown === '1');
+    el.setAttribute('data-peak-tip', tip);
+    const label = count === 1 ? '1 reset' : `${count} resets`;
+    el.setAttribute('aria-label', `${label}. ${tip}`);
+  });
+}
+
+function codexResetCreditsHTML(rc) {
+  const count = codexResetCreditsCount(rc);
+  if (count <= 0) return '';
+  const label = count === 1 ? '1 reset' : `${count} resets`;
+  const tip = codexResetCreditsTooltip(rc, count);
+  const unknown = Array.isArray(rc.credits) && rc.credits.some(c => c.expiry_unknown);
+  return `<span class="peak-chip-wrap reset-chip-wrap" data-peak-tip="${escapeHTML(tip)}" data-reset-count="${count}" data-reset-expires="${escapeHTML(rc.next_expires_at || '')}" data-reset-unknown="${unknown ? '1' : ''}" tabindex="0" role="img" aria-label="${escapeHTML(label + '. ' + tip)}">`
+    + `<span class="peak-chip reset-chip">${escapeHTML(label)}</span>`
+    + '</span>';
+}
+
+// The chip identity used to decide whether a re-render is needed: only the
+// count, so the live expiry tooltip never forces a re-render on every poll.
+function codexResetCreditsKeyFromData(rc) {
+  return String(codexResetCreditsCount(rc));
+}
+
+function codexResetCreditsKey(container) {
+  if (!container) return '0';
+  const chip = container.querySelector('.reset-chip-wrap');
+  return chip ? String(parseInt(chip.dataset.resetCount, 10) || 0) : '0';
+}
+
 function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, pause) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const visibleQuotas = filterCodexQuotasForPlan(quotas, planType);
+  const resetsHTML = codexResetCreditsHTML(pause && pause.resetCredits);
   const sourceNoteHTML = codexPauseNoticeHTML(pause) + codexUsageSourceNoteHTML(usageSourceNote);
   if (visibleQuotas.length === 0) {
     container.innerHTML = `${sourceNoteHTML}<p class="empty-state">No Codex quota data available yet.</p>`;
@@ -2853,6 +2847,7 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
           <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
           ${displayName}
           ${codexAutoStartBadge(q.name)}
+          ${i === 0 ? resetsHTML : ''}
         </h2>
         <span class="countdown" id="${countdownId}">${q.timeUntilResetSeconds > 0 ? formatDuration(q.timeUntilResetSeconds) : '--:--'}</span>
       </header>
@@ -2919,7 +2914,10 @@ function renderCodexQuotaCardsForAccount(quotas, container, accountName, planTyp
   header.className = 'codex-account-header';
   header.innerHTML = `
     <span class="codex-account-name">${escapeHTML(accountName)}</span>
-    <span class="codex-account-plan">${escapeHTML(formatCodexPlan(planType, planLabel))}</span>
+    <span class="codex-account-meta">
+      ${codexResetCreditsHTML(pause && pause.resetCredits)}
+      <span class="codex-account-plan">${escapeHTML(formatCodexPlan(planType, planLabel))}</span>
+    </span>
   `;
   container.appendChild(header);
   container.insertAdjacentHTML('beforeend', codexPauseNoticeHTML(pause));
@@ -3493,9 +3491,8 @@ async function initTimezoneBadge() {
 
 async function loadTimezoneFromAPI() {
   try {
-    const res = await authFetch(`${API_BASE}/api/settings`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await getSettingsData();
+    if (!data) return;
     activeTimezone = normalizeTz(data.timezone || '');
   } catch (e) {}
 }
@@ -3608,6 +3605,7 @@ async function selectTz(tz, picker, badge) {
   updateBadgeText(badge);
   if (picker) picker.remove();
   try {
+    invalidateSettingsData();
     await authFetch(`${API_BASE}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -4092,10 +4090,13 @@ function renderOpenCodeQuotaCards(quotas, containerId) {
 
     return `<article class="quota-card opencode-card" data-quota="${q.name}" data-provider="opencode" role="button" tabindex="0" aria-label="View ${displayName} details" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
-        <h2 class="quota-title">
-          <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
-          ${displayName}
-        </h2>
+        <div class="quota-title-block">
+          <h2 class="quota-title">
+            <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
+            ${displayName}
+          </h2>
+          ${i === 0 ? peakChipHTML('opencode') : ''}
+        </div>
         <span class="countdown" id="${countdownId}">${q.timeUntilResetSeconds > 0 ? formatDuration(q.timeUntilResetSeconds) : '--:--'}</span>
       </header>
       <div class="progress-stats">
@@ -4621,6 +4622,7 @@ function renderCommandCodeQuotaCards(quotas, containerId) {
             <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
             ${label}
           </h2>
+          ${idx === 0 ? peakChipHTML('commandcode') : ''}
         </div>
         <span class="countdown" id="countdown-commandcode-${name}"${resetsAt ? ` data-reset-at="${resetsAt}"` : ' style="display:none"'}>${cdText}</span>
       </header>
@@ -4776,9 +4778,7 @@ async function fetchCurrent(onlyIfChanged = false) {
           data.quotas.forEach(q => updateCopilotCard(q));
         }
       } else if (provider === 'anthropic') {
-        // Anthropic response: { capturedAt: ..., quotas: [...], promo?: {...} }
-        // Set promo state before rendering cards so promoTagHTML() works
-        updateAnthropicPromoState(data.promo || null);
+        // Anthropic response: { capturedAt: ..., quotas: [...] }
         if (data.quotas) {
           const container = document.getElementById('quota-grid-anthropic');
           if (container && container.children.length === 0) {
@@ -4998,7 +4998,8 @@ async function fetchCodexUsage(options = {}) {
     const sourceNoteChanged = (container.querySelector('.codex-usage-source-note')?.textContent || '') !== sourceNote;
     const pausedChanged = (container.querySelector('.codex-paused-dot') != null) !== Boolean(payload.paused);
     const staleChanged = (container.querySelector('.quota-card.stale-card') != null) !== Boolean(payload.isStale);
-    if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged || staleChanged) {
+    const resetsChanged = codexResetCreditsKey(container) !== codexResetCreditsKeyFromData(payload.resetCredits);
+    if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged || staleChanged || resetsChanged) {
       renderCodexQuotaCards(visibleQuotas, 'quota-grid-codex', State.codexPlanType, payload.usageSourceNote, payload);
     }
 
@@ -5238,16 +5239,25 @@ async function renderMultiAccountChart(provider, range, requestSeq) {
     const accId = acc.accountId || acc.id;
     try {
       const res = await authFetch(`${API_BASE}/api/history?range=${range}&provider=${provider}&account=${encodeURIComponent(accId)}`);
-      if (!res.ok) return { acc, data: [] };
+      if (!res.ok) return { acc, error: `HTTP ${res.status}`, status: res.status };
       const data = await res.json();
+      const bodyError = historyBodyError(provider, data);
+      if (bodyError) return { acc, error: bodyError, status: res.status };
       return { acc, data: Array.isArray(data) ? data : [] };
     } catch (e) {
-      return { acc, data: [] };
+      return { acc, error: e && e.message ? e.message : String(e), status: 0 };
     }
   }));
 
   if (State.historyRequestSeq !== requestSeq) return;
   if (!isAccountsOverviewMode(provider)) return;
+
+  const failed = histories.find(h => h.error);
+  if (failed) {
+    warnHistoryFailure(provider, range, failed.error, failed.status);
+    markHistoryFailureStale(provider, range, requestSeq, null);
+    return;
+  }
 
   const ctx = document.getElementById('usage-chart');
   if (!ctx || typeof Chart === 'undefined') return;
@@ -5322,6 +5332,7 @@ async function renderMultiAccountChart(provider, range, requestSeq) {
       },
     },
   });
+  recordChartRendered(provider, range);
 }
 
 
@@ -6134,6 +6145,204 @@ function updateChartTheme() {
   State.chart.update('none');
 }
 
+// historyBodyError reports why a successful HTTP response still cannot be
+// charted. An empty array is a real empty range, not an error.
+function historyBodyError(provider, data) {
+  if (data == null || typeof data !== 'object') return 'invalid body';
+  if (data.error) return String(data.error);
+  if (provider === 'both') {
+    return Array.isArray(data) ? 'invalid body' : '';
+  }
+  if (provider === 'antigravity') {
+    if (Array.isArray(data) || (!Array.isArray(data.labels) && !Array.isArray(data.datasets))) return 'invalid body';
+    return '';
+  }
+  return Array.isArray(data) ? '' : 'invalid body';
+}
+
+function warnHistoryFailure(provider, range, reason, status) {
+  console.warn('[onWatch] history fetch failed', { provider, range, status, reason });
+}
+
+// ── Chart staleness ──
+// A failed history fetch keeps the lines already drawn. That is only honest
+// while the drawn lines belong to the provider, account and range now selected.
+// Anything else gets an amber hollow dot so the old data is visibly stale.
+
+function chartAccountKey(provider) {
+  if (provider === 'codex') return State.codexAccount == null ? null : State.codexAccount;
+  if (provider === 'minimax') return State.minimaxAccount == null ? null : State.minimaxAccount;
+  return null;
+}
+
+function chartAccountLabel(provider) {
+  const id = chartAccountKey(provider);
+  if (id == null || id === 'all') return id === 'all' ? 'All accounts' : '';
+  const list = provider === 'codex'
+    ? (State.codexProfiles || [])
+    : (provider === 'minimax' ? (State.minimaxAccounts || []) : []);
+  const match = list.find(item => String(item.id) === String(id));
+  if (match) return match.name || match.accountName || `Account ${id}`;
+  return `Account ${id}`;
+}
+
+// chartAccountLabelFor names an explicit account id, for failures that belong
+// to a different account than the one the chart still shows.
+function chartAccountLabelFor(provider, account) {
+  if (account == null || account === 'all') return account === 'all' ? 'All accounts' : '';
+  const list = provider === 'codex'
+    ? (State.codexProfiles || [])
+    : (provider === 'minimax' ? (State.minimaxAccounts || []) : []);
+  const match = list.find(item => String(item.id) === String(account));
+  if (match) return match.name || match.accountName || `Account ${account}`;
+  return `Account ${account}`;
+}
+
+function chartProviderLabel(provider) {
+  return bothProviderNames[provider] || toTitleCase(provider);
+}
+
+function chartStaleMark() {
+  const existing = document.getElementById('chart-stale-dot');
+  if (existing) return existing;
+  const host = document.querySelector('.chart-section .chart-controls')
+    || document.querySelector('.chart-section .section-header')
+    || document.querySelector('.chart-container');
+  if (!host || typeof document.createElement !== 'function') return null;
+  const mark = document.createElement('span');
+  mark.id = 'chart-stale-dot';
+  mark.className = 'chart-stale-dot';
+  mark.setAttribute('role', 'img');
+  host.appendChild(mark);
+  return mark;
+}
+
+function clearChartStale() {
+  const mark = document.getElementById('chart-stale-dot');
+  if (!mark) return;
+  mark.classList.remove('stale');
+  mark.removeAttribute('title');
+  mark.removeAttribute('aria-label');
+}
+
+function markChartStale(reason) {
+  if (!reason) return;
+  const mark = chartStaleMark();
+  if (!mark) return;
+  mark.classList.add('stale');
+  mark.setAttribute('title', reason);
+  mark.setAttribute('aria-label', reason);
+}
+// The rendered key lives on the chart itself, so destroying the chart also
+// drops the claim that its lines match the current selection.
+function recordChartRendered(provider, range) {
+  if (!State.chart) return;
+  State.chart.renderKey = {
+    provider,
+    account: chartAccountKey(provider),
+    accountLabel: chartAccountLabel(provider),
+    range,
+    lastSuccessAt: Date.now(),
+  };
+  clearChartStale();
+}
+
+function historyRequestIsCurrent(provider, account, range, seq) {
+  if (State.historyRequestSeq !== seq) return false;
+  if (getCurrentProvider() !== provider) return false;
+  if (provider === 'codex' && State.codexAccount !== account) return false;
+  if (State.currentRange !== range) return false;
+  return true;
+}
+
+
+// historyAgeLabel renders the age of retained chart data at minute granularity,
+// so it grows smoothly instead of jumping in whole-day steps.
+function historyAgeLabel(epochMs) {
+  const seconds = Math.max(0, (Date.now() - epochMs) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+// markHistoryFailureStale keeps the drawn lines but marks them stale whenever
+// the request that failed is still the current one. Currentness is judged
+// against the account the request was made for, not the account the chart
+// still shows: after an account switch the request is current and the retained
+// lines are not. A mismatch between the drawn lines and the selection is extra
+// context; the age of the retained data is the primary reason. Failures from
+// obsolete requests never touch the mark.
+function markHistoryFailureStale(provider, range, seq, requestAccount) {
+  const rendered = State.chart && State.chart.renderKey;
+  if (!rendered) return;
+  const failedAccount = requestAccount != null ? requestAccount : chartAccountKey(provider);
+  if (seq != null && !historyRequestIsCurrent(provider, failedAccount, range, seq)) return;
+  let reason = '';
+  if (rendered.provider !== provider) {
+    reason = `Showing ${chartProviderLabel(rendered.provider)} data - ${chartProviderLabel(provider)} failed to load`;
+  } else if (String(rendered.account == null ? '' : rendered.account) !== String(failedAccount == null ? '' : failedAccount)) {
+    const shownLabel = rendered.accountLabel || 'previous account';
+    const failedLabel = chartAccountLabelFor(provider, failedAccount) || 'selected account';
+    reason = `Showing ${shownLabel} data - ${failedLabel} failed to load`;
+  } else if (rendered.range !== range) {
+    reason = `Showing ${rendered.range} data - ${range} failed to load`;
+  }
+  const age = rendered.lastSuccessAt ? historyAgeLabel(rendered.lastSuccessAt) : '';
+  if (!reason) {
+    markChartStale(age ? `Last updated ${age} - refresh failed` : 'Refresh failed');
+    return;
+  }
+  markChartStale(age ? `${reason} (last updated ${age})` : reason);
+}
+
+// mergeAllProvidersHistory keeps the last rows of providers whose read failed.
+// The backend lists those failures in `errors`; a provider missing from the
+// response without an entry there was configured away and may be dropped.
+function mergeAllProvidersHistory(previous, data) {
+  const prior = previous && typeof previous === 'object' ? previous : {};
+  const merged = Object.assign({}, data);
+  const errors = data && typeof data.errors === 'object' && data.errors ? data.errors : {};
+  merged.errors = errors;
+  const errorKeys = Object.keys(errors);
+
+  errorKeys.forEach((key) => {
+    const parts = String(key).split(':');
+    const provider = parts[0];
+    if (parts[1]) {
+      const arrayKey = provider === 'codex'
+        ? 'codexAccounts'
+        : (provider === 'minimax' ? 'minimaxAccounts' : null);
+      const id = parts[1];
+      if (arrayKey !== null) {
+        const current = Array.isArray(merged[arrayKey]) ? merged[arrayKey].slice() : [];
+        const match = (Array.isArray(prior[arrayKey]) ? prior[arrayKey] : [])
+          .find(acc => String(acc && acc.accountId) === String(id));
+        if (match && !current.some(acc => String(acc && acc.accountId) === String(id))) {
+          current.push(match);
+        }
+        if (current.length) merged[arrayKey] = current;
+      }
+      // Single-account cards read the flat key when the account list is absent.
+      if (merged[provider] == null && prior[provider] != null) {
+        merged[provider] = prior[provider];
+      }
+      return;
+    }
+    if (merged[provider] == null && prior[provider] != null) {
+      merged[provider] = prior[provider];
+    }
+    if (provider === 'codex' && merged.codexAccounts == null && prior.codexAccounts != null) {
+      merged.codexAccounts = prior.codexAccounts;
+    }
+    if (provider === 'minimax' && merged.minimaxAccounts == null && prior.minimaxAccounts != null) {
+      merged.minimaxAccounts = prior.minimaxAccounts;
+    }
+  });
+
+  return merged;
+}
+
 async function fetchHistory(range) {
   if (range === undefined) {
     const activeBtn = document.querySelector('.range-btn[data-range].active');
@@ -6154,22 +6363,43 @@ async function fetchHistory(range) {
   try {
     if (requestProvider === 'api-integrations') {
       const res = await authFetch(`${API_BASE}/api/api-integrations/history?range=${range}`);
-      if (!res.ok) throw new Error('Failed to fetch API integrations history');
+      if (!res.ok) {
+        warnHistoryFailure(requestProvider, range, `HTTP ${res.status}`, res.status);
+        markHistoryFailureStale(requestProvider, range, requestSeq, requestAccount);
+        return;
+      }
       const data = await res.json();
+      if (!data || typeof data !== 'object' || data.error) {
+        warnHistoryFailure(requestProvider, range, (data && data.error) || 'invalid body', res.status);
+        markHistoryFailureStale(requestProvider, range, requestSeq, requestAccount);
+        return;
+      }
 
       if (State.historyRequestSeq !== requestSeq) return;
       if (getCurrentProvider() !== requestProvider) return;
       if (State.currentRange !== requestRange) return;
-
+      if (!State.chart) initChart();
+      if (!State.chart) return;
       State.apiIntegrationsHistory = data;
       renderAPIIntegrationsChart(range);
       renderAPIIntegrationsInsights();
+      recordChartRendered(requestProvider, range);
       return;
     }
 
     const res = await authFetch(`${API_BASE}/api/history?range=${range}&${providerParam()}`);
-    if (!res.ok) throw new Error('Failed to fetch history');
+    if (!res.ok) {
+      warnHistoryFailure(requestProvider, range, `HTTP ${res.status}`, res.status);
+      markHistoryFailureStale(requestProvider, range, requestSeq, requestAccount);
+      return;
+    }
     const data = await res.json();
+    const bodyError = historyBodyError(requestProvider, data);
+    if (bodyError) {
+      warnHistoryFailure(requestProvider, range, bodyError, res.status);
+      markHistoryFailureStale(requestProvider, range, requestSeq, requestAccount);
+      return;
+    }
 
     let apiIntegrationsHistoryData = null;
     if (requestProvider === 'both' && State.apiIntegrationsVisibility?.dashboard !== false) {
@@ -6183,10 +6413,7 @@ async function fetchHistory(range) {
       }
     }
 
-    if (State.historyRequestSeq !== requestSeq) return;
-    if (getCurrentProvider() !== requestProvider) return;
-    if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
-    if (State.currentRange !== requestRange) return;
+    if (!historyRequestIsCurrent(requestProvider, requestAccount, requestRange, requestSeq)) return;
 
     const provider = requestProvider;
 
@@ -6195,7 +6422,7 @@ async function fetchHistory(range) {
         data.apiIntegrations = apiIntegrationsHistoryData;
         State.apiIntegrationsHistory = apiIntegrationsHistoryData;
       }
-      State.allProvidersHistory = data;
+      State.allProvidersHistory = mergeAllProvidersHistory(State.allProvidersHistory, data);
       renderAllProvidersView();
       return;
     }
@@ -6233,6 +6460,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6271,6 +6499,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6310,6 +6539,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6348,6 +6578,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6384,6 +6615,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6420,6 +6652,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6465,6 +6698,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6494,6 +6728,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6527,11 +6762,14 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
     if (provider === 'mistral') {
       State.chart.data.datasets = buildDynamicDatasetsForRows(historyRows.map(row => {const flat={capturedAt:row.capturedAt}; (row.quotas||[]).forEach(q=>{flat[q.name]=q.utilization;});return flat;}), range, mistralDisplayNames, mistralChartColors, opencodeChartColorFallback, 'mistral');
-      updateTimeScale(State.chart, range); State.chart.update(); return;
+      updateTimeScale(State.chart, range); State.chart.update();
+      recordChartRendered(provider, range);
+      return;
     }
     if (provider === 'opencode') {
       const flattenedRows = historyRows.map(row => {
@@ -6558,6 +6796,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6594,6 +6833,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6620,6 +6860,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6631,6 +6872,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart, { cap: false });
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6664,6 +6906,7 @@ async function fetchHistory(range) {
       State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
       State.chart.options.scales.y.max = State.chartYMax;
       State.chart.update();
+      recordChartRendered(provider, range);
       return;
     }
 
@@ -6702,8 +6945,10 @@ async function fetchHistory(range) {
     State.chartYMax = computeYMax(State.chart.data.datasets, State.chart);
     State.chart.options.scales.y.max = State.chartYMax;
     State.chart.update();
+    recordChartRendered(provider, range);
   } catch (err) {
-    // history fetch error - chart shows empty state
+    warnHistoryFailure(requestProvider, range, err && err.message ? err.message : String(err), 0);
+    markHistoryFailureStale(requestProvider, range, requestSeq, requestAccount);
   }
 }
 
@@ -6909,11 +7154,6 @@ function buildAllProviderEntries() {
       order.push(provider);
     });
 
-  // Set Anthropic promo state so promoTagHTML() works in both view
-  if (current.anthropic && current.anthropic.promo) {
-    updateAnthropicPromoState(current.anthropic.promo);
-  }
-
   const entries = [];
 
   const addProviderEntry = (provider) => {
@@ -6984,6 +7224,7 @@ function buildAllProviderEntries() {
           historyRows: Array.isArray(historyPayload?.history)
             ? historyPayload.history
             : (Array.isArray(history.codex) ? history.codex : []),
+          historyErrorKey: `codex:${accountID}`,
         });
       });
       return;
@@ -7010,6 +7251,7 @@ function buildAllProviderEntries() {
           quotas: normalizeBothQuotas('minimax', payload),
           insights: insights.minimax || { stats: [], insights: [] },
           historyRows: Array.isArray(history.minimax) ? history.minimax : [],
+          historyErrorKey: 'minimax',
         });
         return;
       }
@@ -7048,6 +7290,7 @@ function buildAllProviderEntries() {
           historyRows: Array.isArray(historyPayload?.history)
             ? historyPayload.history
             : (Array.isArray(history.minimax) ? history.minimax : []),
+          historyErrorKey: `minimax:${accountID}`,
         });
       });
       return;
@@ -7067,13 +7310,14 @@ function buildAllProviderEntries() {
           : (provider === 'mistral' || provider === 'cursor' || provider === 'opencode'
             ? (payload.planName || toTitleCase(payload.accountType || ''))
             : toTitleCase(payload.planType || ''))),
-      promoHtml: provider === 'anthropic' && payload.promo ? promoTagHTML() : '',
+      peakMeta: peakMetaForProvider(provider),
       planType: payload.planType || '',
       quotas: normalizeBothQuotas(provider, payload),
       billing: provider === "mistral" ? payload.billing : null,
       showBilling: payload.showBilling !== false,
       insights: insights[provider] || { stats: [], insights: [] },
       historyRows: Array.isArray(history[provider]) ? history[provider] : [],
+      historyErrorKey: provider,
     });
   };
 
@@ -7085,7 +7329,7 @@ function renderProviderKPIHTML(quotas, provider) {
   if (!Array.isArray(quotas) || quotas.length === 0) {
     return '<p class="insight-text">No KPI data available yet.</p>';
   }
-  return quotas.map((quota) => {
+  return quotas.map((quota, index) => {
     const percent = Number(quota.cardPercent ?? 0);
     const status = quota.status || 'healthy';
     const statusCfg = statusConfig[status] || statusConfig.healthy;
@@ -7110,6 +7354,7 @@ function renderProviderKPIHTML(quotas, provider) {
             ${escapeHTML(displayName)}
             ${provider === 'codex' ? codexAutoStartBadge(quota.name) : ''}
           </h2>
+          ${index === 0 ? peakChipHTML(provider) : ''}
           ${subtitle ? `<div class="quota-subtitle">${escapeHTML(subtitle)}</div>` : ''}
         </div>
         ${countdown}
@@ -7669,6 +7914,30 @@ function destroyProviderCardCharts() {
   State.providerCharts = {};
 }
 
+// providerHistoryError returns the backend read error recorded for one card,
+// exact account first, then the provider as a whole.
+function providerHistoryError(entry) {
+  const errors = State.allProvidersHistory && State.allProvidersHistory.errors;
+  if (!errors || typeof errors !== 'object') return '';
+  if (entry.historyErrorKey && errors[entry.historyErrorKey]) return String(errors[entry.historyErrorKey]);
+  if (entry.provider && errors[entry.provider]) return String(errors[entry.provider]);
+  return '';
+}
+
+// providerHistoryStaleMark is the amber hollow dot for a mini-chart whose
+// latest read failed: the lines stay, with their age in the tooltip.
+function providerHistoryStaleMark(entry) {
+  if (!providerHistoryError(entry)) return '';
+  const rows = Array.isArray(entry.historyRows) ? entry.historyRows : [];
+  if (rows.length === 0) return '';
+  const lastCaptured = rows[rows.length - 1] && rows[rows.length - 1].capturedAt;
+  const lastMs = lastCaptured ? Date.parse(lastCaptured) : NaN;
+  const age = Number.isFinite(lastMs) ? historyAgeLabel(lastMs) : '';
+  const reason = age ? `Last updated ${age} - refresh failed` : 'Refresh failed - showing previous data';
+  const label = escapeHTML(reason);
+  return `<span class="provider-chart-stale-dot chart-stale-dot stale" role="img" title="${label}" aria-label="${label}"></span>`;
+}
+
 function renderAllProvidersView() {
   const container = document.getElementById('all-providers-container');
   if (!container) return;
@@ -7685,7 +7954,12 @@ function renderAllProvidersView() {
   container.innerHTML = entries.map((entry) => {
     const collapsed = Boolean(collapsedState[entry.cardKey]);
     const badge = entry.badge ? `<span class="provider-card-badge">${escapeHTML(entry.badge)}</span>` : '';
-    const promo = entry.promoHtml || '';
+    // The first KPI card carries the chip. Only a provider without KPI cards
+    // (balance providers such as DeepSeek) needs it in the header instead.
+    const hasKpiChip = Array.isArray(entry.quotas) && entry.quotas.length > 0;
+    const peak = entry.peakMeta && !hasKpiChip && window.OnWatchPeak
+      ? window.OnWatchPeak.peakChipMarkup(entry.peakMeta)
+      : '';
     const hasChartData = Array.isArray(entry.historyRows) && entry.historyRows.length > 0;
     const chartSection = hasChartData
       ? `<div class="provider-chart">
@@ -7697,10 +7971,11 @@ function renderAllProvidersView() {
     if (entry.summaryOnly) {
       return renderAPIIntegrationsSummaryCard(entry, collapsed);
     }
+    const staleMark = providerHistoryStaleMark(entry);
     const cardHeader = `<header class="provider-card-header">
         <div class="provider-card-title">
           <span>${escapeHTML(entry.title)}</span>
-          ${badge}${promo}
+          ${badge}${peak}${staleMark}
         </div>
         <div class="provider-card-actions">${providerResetHTML(entry)}
         <button class="provider-card-collapse-btn" type="button" data-card-key="${entry.cardKey}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHTML(entry.title)}">
@@ -8315,6 +8590,18 @@ function aggregateCyclesByBucket(rows, bucketMinutes) {
   return [...grouped.values()].sort((a, b) => new Date(b.cycleStart).getTime() - new Date(a.cycleStart).getTime());
 }
 
+function windowQuotaSampleHTML(quota) {
+  if (!quota) return '--';
+  const percent = Number.isFinite(quota.percent) ? `${quota.percent.toFixed(1)}%` : '';
+  if (quota.format === 'percent') return percent || '--';
+  const amount = value => quota.format === 'currency'
+    ? `$${Number(value).toFixed(2)}`
+    : Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 });
+  if (!Number.isFinite(quota.value)) return percent || '--';
+  if (!(quota.limit > 0)) return amount(quota.value);
+  return `${amount(quota.value)} / ${amount(quota.limit)} <span class="delta">(${percent})</span>`;
+}
+
 function renderCyclesTable() {
   const thead = document.getElementById('cycles-thead');
   const tbody = document.getElementById('cycles-tbody');
@@ -8323,6 +8610,7 @@ function renderCyclesTable() {
   if (!thead || !tbody) return;
 
   const provider = getCurrentProvider();
+  const windowProvider = provider === 'opencode' || provider === 'commandcode';
   const quotaNames = State.cyclesQuotaNames;
   const usePercent = provider === 'anthropic' || provider === 'copilot' || provider === 'codex' || provider === 'antigravity' || provider === 'minimax' || provider === 'gemini' || provider === 'openrouter' || provider === 'cursor' || provider === 'grok' || provider === 'kimi' || provider === 'mistral' || provider === 'opencode' || provider === 'ollama';
   const deltaUsesPercent = usePercent && provider !== 'minimax';
@@ -8353,7 +8641,7 @@ function renderCyclesTable() {
 
   quotaNames.forEach(qn => {
     const displayName = getQuotaDisplayName(qn, provider);
-    const suffix = usePercent ? ' %' : '';
+    const suffix = usePercent && !windowProvider ? ' %' : '';
     headerHtml += `<th data-sort-key="cq_${qn}" role="button" tabindex="0">${displayName}${suffix} <span class="sort-arrow"></span></th>`;
   });
   headerHtml += '</tr>';
@@ -8517,7 +8805,11 @@ function renderCyclesTable() {
         const cls = getThresholdClass(pct);
         let cellVal = '--';
         if (pct >= 0) {
-          if (provider === 'minimax') {
+          if (windowProvider) {
+            const quota = getCrossQuotaValue(row, qn);
+            const reset = quota?.resetsAt ? ` title="Resets ${escapeHTML(formatDateTime(quota.resetsAt))}"` : '';
+            cellVal = `<span${reset}>${windowQuotaSampleHTML(quota)}</span>`;
+          } else if (provider === 'minimax') {
             const cq = getCrossQuotaValue(row, qn);
             const used = Number(cq?.value || 0);
             const limit = Number(cq?.limit || 0);
@@ -9693,9 +9985,8 @@ function renderOverviewTable() {
   const overviewProv = getOverviewProvider();
   const usePercent = overviewProv === 'anthropic' || overviewProv === 'codex' || overviewProv === 'antigravity' || overviewProv === 'minimax' || overviewProv === 'gemini' || overviewProv === 'openrouter' || overviewProv === 'cursor' || overviewProv === 'grok' || overviewProv === 'kimi' || overviewProv === 'mistral' || overviewProv === 'opencode' || overviewProv === 'ollama' || overviewProv === 'muse' || overviewProv === 'commandcode';
   const deltaUsesPercent = usePercent && overviewProv !== 'minimax';
-  // MiniMax reports a percentage-based quota; the Duration and Total Delta
-  // columns add no signal there, so omit them for this provider.
-  const showDurationDelta = overviewProv !== 'minimax';
+  const windowProvider = overviewProv === 'opencode' || overviewProv === 'commandcode';
+  const showDurationDelta = overviewProv !== 'minimax' && !windowProvider;
   const showAccount = isAccountsOverviewMode(getCurrentProvider());
   const accountTh = showAccount ? '<th data-sort-key="account" role="button" tabindex="0">Account <span class="sort-arrow"></span></th>' : '';
 
@@ -9706,6 +9997,9 @@ function renderOverviewTable() {
       <th data-sort-key="id" role="button" tabindex="0">Cycle <span class="sort-arrow"></span></th>
       <th data-sort-key="start" role="button" tabindex="0">Start <span class="sort-arrow"></span></th>
       <th data-sort-key="end" role="button" tabindex="0">End <span class="sort-arrow"></span></th>`;
+  if (windowProvider) {
+    headerHtml += '<th data-sort-key="reset" role="button" tabindex="0">Reset <span class="sort-arrow"></span></th>';
+  }
   if (showDurationDelta) {
     headerHtml += `
       <th data-sort-key="duration" role="button" tabindex="0">Duration <span class="sort-arrow"></span></th>
@@ -9716,7 +10010,7 @@ function renderOverviewTable() {
     const isPrimary = qn === State.overviewGroupBy;
     const displayName = getQuotaDisplayName(qn, overviewProv);
     const suffix = usePercent ? ' %' : '';
-    const maxIndicator = isPrimary ? ' Max' : '';
+    const maxIndicator = isPrimary ? (windowProvider ? ' Peak' : ' Max') : (windowProvider ? ' at peak' : '');
     headerHtml += `<th data-sort-key="cq_${qn}" role="button" tabindex="0" ${isPrimary ? 'class="overview-primary-col"' : ''}>${displayName}${maxIndicator}${suffix} <span class="sort-arrow"></span></th>`;
   });
   headerHtml += '</tr>';
@@ -9742,6 +10036,7 @@ function renderOverviewTable() {
       if (key === 'id') { va = a.cycleId; vb = b.cycleId; }
       else if (key === 'start') { va = a.cycleStart; vb = b.cycleStart; }
       else if (key === 'end') { va = a.cycleEnd || ''; vb = b.cycleEnd || ''; }
+      else if (key === 'reset') { va = a.resetsAt || ''; vb = b.resetsAt || ''; }
       else if (key === 'duration') {
         va = a.cycleEnd ? new Date(a.cycleEnd) - new Date(a.cycleStart) : 0;
         vb = b.cycleEnd ? new Date(b.cycleEnd) - new Date(b.cycleStart) : 0;
@@ -9750,8 +10045,8 @@ function renderOverviewTable() {
       else if (key === 'account') { va = a._account || ''; vb = b._account || ''; }
       else if (key.startsWith('cq_')) {
         const qn = key.slice(3);
-        va = getCrossQuotaPercent(a, qn);
-        vb = getCrossQuotaPercent(b, qn);
+        va = windowProvider && qn === State.overviewGroupBy ? a.peakValue : getCrossQuotaPercent(a, qn);
+        vb = windowProvider && qn === State.overviewGroupBy ? b.peakValue : getCrossQuotaPercent(b, qn);
       }
       else { va = 0; vb = 0; }
       if (va < vb) return dir === 'asc' ? -1 : 1;
@@ -9781,7 +10076,7 @@ function renderOverviewTable() {
   };
 
   if (pageData.length === 0) {
-    const colCount = (showAccount ? 1 : 0) + (showDurationDelta ? 5 : 3) + quotaNames.length;
+    const colCount = (showAccount ? 1 : 0) + (showDurationDelta ? 5 : 3) + (windowProvider ? 1 : 0) + quotaNames.length;
     const emptyMsg = overviewProv === 'cursor'
       ? 'No completed monthly billing cycles found for this quota yet.'
       : 'No completed cycles found for this period.';
@@ -9807,6 +10102,9 @@ function renderOverviewTable() {
         <td>${cycleLabel}</td>
         <td>${start ? formatDateTime(start) : '--'}</td>
         <td>${end ? formatDateTime(end) : '<span class="badge">Active</span>'}</td>`;
+      if (windowProvider) {
+        html += `<td>${row.resetsAt ? formatDateTime(row.resetsAt) : '--'}</td>`;
+      }
       if (showDurationDelta) {
         html += `
         <td>${duration}</td>
@@ -9814,13 +10112,16 @@ function renderOverviewTable() {
       }
 
       quotaNames.forEach(qn => {
-        const pct = getCrossQuotaPercent(row, qn);
-        const delta = getCrossQuotaDelta(row, qn);
         const isPrimary = qn === State.overviewGroupBy;
+        const pct = windowProvider && isPrimary && Number.isFinite(row.peakValue)
+          ? row.peakValue : getCrossQuotaPercent(row, qn);
+        const delta = getCrossQuotaDelta(row, qn);
         const cls = getThresholdClass(pct);
         let cellVal = '--';
         if (pct >= 0) {
-          if (overviewProv === 'minimax' || overviewProv === 'gemini') {
+          if (windowProvider) {
+            cellVal = `${pct.toFixed(1)}%`;
+          } else if (overviewProv === 'minimax' || overviewProv === 'gemini') {
             const cq = getCrossQuotaValue(row, qn);
             const used = Number(cq?.value || 0);
             const limit = Number(cq?.limit || 0);
@@ -10056,6 +10357,17 @@ function startAutoRefresh() {
   State.refreshInterval = setInterval(refresh, REFRESH_INTERVAL);
   State.autoRefreshVisibilityHandler = () => document.hidden ? undefined : refresh();
   document.addEventListener('visibilitychange', State.autoRefreshVisibilityHandler);
+  // Peak chips count down from the page clock, so their 30s ticker makes no
+  // API calls and keeps the state in step between refreshes.
+  if (State.peakTickInterval) clearInterval(State.peakTickInterval);
+  State.peakTickInterval = setInterval(() => {
+    if (window.OnWatchPeak) window.OnWatchPeak.refreshPeakChips();
+    refreshResetChipTips();
+  }, 30000);
+  if (window.OnWatchPeak) {
+    window.OnWatchPeak.initPeakChipTooltips();
+    window.OnWatchPeak.refreshPeakChips();
+  }
 }
 
 // ── Pagination Helper ──
@@ -10331,6 +10643,9 @@ async function loadSettings() {
       if (resetCheck) resetCheck.checked = n.notify_reset !== false;
       const authErrorCheck = document.getElementById('notify-auth-error');
       if (authErrorCheck) authErrorCheck.checked = !!n.notify_auth_error;
+      // Absent means the default (on) for the reset-credit expiry warning.
+      const resetCreditCheck = document.getElementById('notify-reset-credit-expiry');
+      if (resetCreditCheck) resetCreditCheck.checked = n.notify_reset_credit_expiry !== false;
       const repeatCheck = document.getElementById('notify-repeat');
       if (repeatCheck) repeatCheck.checked = !!n.notify_repeat;
       setVal('notify-cooldown', n.cooldown_minutes || 30);
@@ -11445,6 +11760,7 @@ function createAPIIntegrationsToggleRow(visibility, health) {
     const feedback = document.getElementById('settings-feedback');
     input.disabled = true;
     try {
+      invalidateSettingsData();
       const res = await authFetch(`${API_BASE}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -11987,6 +12303,7 @@ async function saveProviderSettings() {
 
   try {
     const payload = { provider_settings: { [providerKey]: provData } };
+    invalidateSettingsData();
     const res = await authFetch(`${API_BASE}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -12168,6 +12485,7 @@ function gatherSettings() {
       notify_critical: document.getElementById('notify-critical')?.checked ?? true,
       notify_reset: document.getElementById('notify-reset')?.checked ?? true,
       notify_auth_error: document.getElementById('notify-auth-error')?.checked ?? false,
+      notify_reset_credit_expiry: document.getElementById('notify-reset-credit-expiry')?.checked ?? true,
       notify_repeat: document.getElementById('notify-repeat')?.checked ?? false,
       cooldown_minutes: parseInt(document.getElementById('notify-cooldown')?.value) || 30,
       channels: {
@@ -12293,6 +12611,7 @@ function setupSettingsSave() {
     }
 
     try {
+      invalidateSettingsData();
       const resp = await authFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -12425,6 +12744,7 @@ function loadWebhookSettings(webhook) {
     'webhook-event-critical': 'critical',
     'webhook-event-reset': 'reset',
     'webhook-event-auth-error': 'auth_error',
+    'webhook-event-reset-credit-expiry': 'reset_credit_expiry',
     'webhook-event-starter-success': 'starter_success',
     'webhook-event-starter-failure': 'starter_failure',
   };
@@ -12460,6 +12780,7 @@ function collectWebhookSettings() {
       critical: document.getElementById('webhook-event-critical')?.checked ?? false,
       reset: document.getElementById('webhook-event-reset')?.checked ?? false,
       auth_error: document.getElementById('webhook-event-auth-error')?.checked ?? false,
+      reset_credit_expiry: document.getElementById('webhook-event-reset-credit-expiry')?.checked ?? false,
       starter_success: document.getElementById('webhook-event-starter-success')?.checked ?? false,
       starter_failure: document.getElementById('webhook-event-starter-failure')?.checked ?? false,
     },
@@ -13150,9 +13471,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // dashboard view so live UI indicators (e.g. Auto-start badge) can read them
   // without depending on a prior visit to /settings.
   try {
-    const r = await authFetch(`${API_BASE}/api/settings`);
-    if (r.ok) {
-      const d = await r.json();
+    const d = await getSettingsData();
+    if (d) {
       State.providerSettings = d.provider_settings || {};
     }
   } catch (_) { /* non-critical: badges simply won't render until settings load */ }
