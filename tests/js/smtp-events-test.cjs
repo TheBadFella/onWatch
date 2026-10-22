@@ -60,3 +60,24 @@ test('notification status exposes missing destinations without displaying privat
   const ready = context.notificationDeliverySummary({notifications:{channels:{webhook:true}},webhook:{url:'https://private.example/secret-token'}});
   assert.equal(ready.attention,false);assert.doesNotMatch(ready.text,/private|secret/);
 });
+
+test('SMTP reminders respect the email channel and saved dismissal', () => {
+  const fork = fs.readFileSync(path.join(__dirname, '../../internal/web/static/fork-ui.js'), 'utf8');
+  const context = vm.createContext({});
+  vm.runInContext(fork.slice(fork.indexOf('function notificationDeliverySummary('), fork.indexOf("document.addEventListener('DOMContentLoaded', async")), context);
+  for (const settings of [
+    {notifications:{channels:{email:false,webhook:true}},webhook:{url:'https://example.test'}},
+    {notifications:{channels:{email:true,webhook:true}},webhook:{url:'https://example.test'},hide_smtp_setup_reminder:true},
+  ]) {
+    const result = context.notificationDeliverySummary(settings);
+    assert.equal(result.attention, false);
+    assert.equal(result.smtpReminder, false);
+    assert.doesNotMatch(result.text, /Email|SMTP|incomplete/);
+  }
+  const missing = context.notificationDeliverySummary({notifications:{channels:{email:true}}});
+  assert.equal(missing.smtpReminder, true);
+  assert.match(missing.text, /Email setup incomplete/);
+  const stillMissingWebhook = context.notificationDeliverySummary({notifications:{channels:{email:true,webhook:true}},hide_smtp_setup_reminder:true});
+  assert.equal(stillMissingWebhook.attention, true);
+  assert.match(stillMissingWebhook.text, /Webhook setup incomplete/);
+});

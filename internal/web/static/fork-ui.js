@@ -201,22 +201,62 @@ function notificationDeliverySummary(settings) {
   const configured = [];
   const missing = [];
   if (channels.webhook) (settings.webhook?.url ? configured : missing).push('Webhook');
-  if (channels.email) (settings.smtp?.host && settings.smtp?.to ? configured : missing).push('Email');
+  const emailReady = Boolean(settings.smtp?.host && settings.smtp?.to);
+  const smtpReminder = Boolean(channels.email && !emailReady && !settings.hide_smtp_setup_reminder);
+  if (channels.email && emailReady) configured.push('Email');
+  if (smtpReminder) missing.push('Email');
   if (channels.push) configured.push('Browser push');
-  return {attention: missing.length > 0,
+  return {attention: missing.length > 0, smtpReminder,
     text: missing.length ? missing.join(' and ') + ' setup incomplete. Open notification settings.'
-      : configured.length ? configured.join(' / ') + ' enabled. Check event filters in settings.' : 'Notification channels are off.'};
+      : configured.length ? configured.join(' / ') + ' enabled. Check event filters in settings.' : channels.email ? '' : 'Notification channels are off.'};
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
   const center = document.querySelector('.welcome-banner');
   if (!center || typeof getSettingsData !== 'function') return;
   try {
-    const summary = notificationDeliverySummary(await getSettingsData());
+    const settings = await getSettingsData();
+    if (!settings) return;
+    document.body.classList.toggle('hide-connect-prompt', settings.hide_connect_prompt === true);
+    const summary = notificationDeliverySummary(settings);
+    const notice = document.createElement('div');
+    notice.className = 'notification-delivery-notice';
     const link = document.createElement('a');
     link.className = 'notification-delivery-status'; link.href = (typeof BASE_PATH === 'string' ? BASE_PATH : '') + '/settings';
     link.textContent = summary.text; link.dataset.attention = String(summary.attention);
-    center.appendChild(link);
+    if (summary.text) notice.appendChild(link);
+    if (summary.smtpReminder) {
+      const label = document.createElement('label');
+      label.className = 'smtp-reminder-dismiss';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      label.append(input, document.createTextNode("Don't remind me about SMTP setup"));
+      const feedback = document.createElement('span');
+      feedback.setAttribute('role', 'status');
+      input.addEventListener('change', async () => {
+        input.disabled = true;
+        feedback.textContent = 'Saving…';
+        try {
+          const response = await authFetch('/api/settings', {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({hide_smtp_setup_reminder: true}),
+          });
+          if (!response.ok) throw new Error('Save failed');
+          invalidateSettingsData();
+          // Keep any unrelated delivery warning visible after dismissing SMTP.
+          const updated = notificationDeliverySummary({...settings, hide_smtp_setup_reminder:true});
+          link.textContent = updated.text;
+          link.dataset.attention = String(updated.attention);
+          label.remove(); feedback.remove();
+          if (!updated.text) notice.remove();
+        } catch (e) {
+          input.checked = false; input.disabled = false;
+          feedback.textContent = 'Could not save. Please try again.';
+        }
+      });
+      notice.append(label, feedback);
+    }
+    center.appendChild(notice);
   } catch (e) { /* The existing connection status covers failed dashboard requests. */ }
 });
 

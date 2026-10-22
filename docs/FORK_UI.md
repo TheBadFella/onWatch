@@ -39,6 +39,14 @@ the existing account name filled in. **Usage available** describes the received
 data, not an independent credential check. Each card shows its last data time.
 Provider settings also offer **Reconnect** beside saved accounts.
 
+In **Settings → General → Homepage prompts**, you can hide the dashboard's
+**Connect account** and **Reconnect** buttons. Connection tools remain available
+under **Settings → Providers**. You can also hide SMTP setup reminders there,
+or check **Don't remind me about SMTP setup** on the homepage reminder itself.
+These choices are saved for this OnWatch installation. SMTP setup reminders
+only appear when the Email delivery channel is enabled and its destination is
+incomplete. Hiding a reminder does not change notification delivery or filters.
+
 Browser sign-in walks through naming the account, approving the device code at
 OpenAI, and returning to OnWatch. Approval checks use the provider's polling
 interval and do not overlap. Expired codes offer a new attempt; closing the

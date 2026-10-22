@@ -7576,6 +7576,13 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"menubar":             menubarSettings,
 		"auto_refresh_tokens": autoRefreshTokens,
 	}
+	for _, key := range []string{"hide_connect_prompt", "hide_smtp_setup_reminder"} {
+		result[key] = false
+		if h.store != nil {
+			value, _ := h.store.GetSetting(key)
+			result[key] = value == "true"
+		}
+	}
 
 	// SMTP settings (never return the actual password)
 	if h.store != nil {
@@ -7688,6 +7695,27 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := map[string]interface{}{}
+
+	// Dashboard presentation preferences support independent partial updates.
+	for _, key := range []string{"hide_connect_prompt", "hide_smtp_setup_reminder"} {
+		if raw, ok := body[key]; ok {
+			var enabled *bool
+			if err := json.Unmarshal(raw, &enabled); err != nil || enabled == nil {
+				respondError(w, http.StatusBadRequest, "invalid "+key+" value")
+				return
+			}
+			value := "false"
+			if *enabled {
+				value = "true"
+			}
+			if err := h.store.SetSetting(key, value); err != nil {
+				h.logger.Error("failed to save dashboard preference", "key", key, "error", err)
+				respondError(w, http.StatusInternalServerError, "failed to save setting")
+				return
+			}
+			result[key] = *enabled
+		}
+	}
 
 	// Handle timezone
 	if raw, ok := body["timezone"]; ok {

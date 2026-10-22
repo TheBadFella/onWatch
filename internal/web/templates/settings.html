@@ -426,6 +426,22 @@
         <!-- General Panel -->
         <div class="settings-panel" id="panel-general" role="tabpanel" hidden>
             <div class="settings-section">
+                <h3 class="settings-section-title">Homepage prompts</h3>
+                <div class="settings-fields">
+                    <label class="settings-checkbox-row">
+                        <input type="checkbox" id="settings-hide-connect-prompt">
+                        <span>Hide Connect account and Reconnect buttons on the dashboard</span>
+                    </label>
+                    <p class="settings-field-hint">You can still connect or reconnect accounts in Settings → Providers.</p>
+                    <label class="settings-checkbox-row">
+                        <input type="checkbox" id="settings-hide-smtp-setup-reminder">
+                        <span>Don't remind me to set up SMTP on the homepage</span>
+                    </label>
+                    <p class="settings-field-hint">SMTP setup reminders only appear when the Email delivery channel is enabled. Hiding the reminder does not change delivery settings.</p>
+                </div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-section">
                 <h3 class="settings-section-title">Credentials</h3>
                 <p class="settings-section-desc">Control how onWatch interacts with coding-harness OAuth tokens on disk (Claude Code, Kimi Code, Codex, etc.).</p>
                 <div class="settings-fields">

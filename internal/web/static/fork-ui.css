@@ -90,6 +90,14 @@
 .sidebar-collapsed .app-sidebar .codex-profile-trigger { min-height: 44px; }
 .notification-delivery-status { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .notification-delivery-status[data-attention="true"] { color: var(--accent-peach); }
+.notification-delivery-notice { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.smtp-reminder-dismiss { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+.smtp-reminder-dismiss input { flex-shrink: 0; width: 18px; height: 18px; }
+.notification-delivery-notice [role="status"] { color: var(--text-muted); font-size: 12px; }
+.hide-connect-prompt #main-content [data-codex-connect] { display: none; }
+@media (max-width: 720px) {
+  .settings-page .footer-content, .settings-page .footer-links { flex-wrap: wrap; }
+}
 @media (max-height: 760px) {
   .app-sidebar, .sidebar-collapsed .app-sidebar { gap: 8px; }
   .app-sidebar .header-meta { display: none; }
