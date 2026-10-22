@@ -24,6 +24,13 @@ provider poll must confirm the new quota cycle. Unknown reset times remain
 explicitly unavailable. Available capacity uses reported utilization, regardless
 of the chosen usage/available display mode. No cost estimates are inferred.
 
+Codex accounts also show a separate **Banked resets** row in both the account
+overview and individual account view. It shows the reported count and next
+expiry when available. **None available** means the provider reported zero;
+**Not reported** means no count was supplied. Quota headings and account names
+wrap so badges and reset information remain visible on narrow screens. This
+display does not redeem reset credits.
+
 ## Live usage updates
 
 The fork includes upstream v2.14.14, including Codex reset-credit reporting,

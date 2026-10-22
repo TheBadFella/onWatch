@@ -21,6 +21,20 @@ function providerResetHTML(entry) {
   return resets.length ? overviewResetHTML(new Date(Math.min(...resets)).toISOString()) : '';
 }
 
+function codexResetSummaryKey(credits) {
+  return JSON.stringify([credits?.available_count ?? null, credits?.next_expires_at ?? null, credits?.status ?? null]);
+}
+
+function codexResetSummaryHTML(credits) {
+  const known = Number.isFinite(credits?.available_count);
+  const count = codexResetCreditsCount(credits);
+  const value = count > 0 ? codexResetCreditsHTML(credits)
+    : `<span class="reset-summary-value">${known ? 'None available' : 'Not reported'}</span>`;
+  const expiry = count > 0 && Number.isFinite(Date.parse(credits?.next_expires_at))
+    ? `<span class="reset-summary-expiry">Next expiry: ${escapeHTML(formatDateTime(credits.next_expires_at))}</span>` : '';
+  return `<div class="reset-credit-summary" data-reset-summary="${escapeHTML(codexResetSummaryKey(credits))}"><span class="reset-summary-label">Banked resets</span>${value}${expiry}</div>`;
+}
+
 function updateOverviewCountdowns(now = Date.now()) {
   document.querySelectorAll('[data-reset-deadline]').forEach(el => {
     el.textContent = overviewResetText(Number(el.dataset.resetDeadline), now);

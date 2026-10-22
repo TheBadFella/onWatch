@@ -2820,8 +2820,7 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
   const container = document.getElementById(containerId);
   if (!container) return;
   const visibleQuotas = filterCodexQuotasForPlan(quotas, planType);
-  const resetsHTML = codexResetCreditsHTML(pause && pause.resetCredits);
-  const sourceNoteHTML = codexPauseNoticeHTML(pause) + codexUsageSourceNoteHTML(usageSourceNote);
+  const sourceNoteHTML = codexPauseNoticeHTML(pause) + codexUsageSourceNoteHTML(usageSourceNote) + codexResetSummaryHTML(pause && pause.resetCredits);
   if (visibleQuotas.length === 0) {
     container.innerHTML = `${sourceNoteHTML}<p class="empty-state">No Codex quota data available yet.</p>`;
     return;
@@ -2847,7 +2846,6 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
           <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
           ${displayName}
           ${codexAutoStartBadge(q.name)}
-          ${i === 0 ? resetsHTML : ''}
         </h2>
         <span class="countdown" id="${countdownId}">${q.timeUntilResetSeconds > 0 ? formatDuration(q.timeUntilResetSeconds) : '--:--'}</span>
       </header>
@@ -2915,11 +2913,11 @@ function renderCodexQuotaCardsForAccount(quotas, container, accountName, planTyp
   header.innerHTML = `
     <span class="codex-account-name">${escapeHTML(accountName)}</span>
     <span class="codex-account-meta">
-      ${codexResetCreditsHTML(pause && pause.resetCredits)}
       <span class="codex-account-plan">${escapeHTML(formatCodexPlan(planType, planLabel))}</span>
     </span>
   `;
   container.appendChild(header);
+  container.insertAdjacentHTML('beforeend', codexResetSummaryHTML(pause && pause.resetCredits));
   container.insertAdjacentHTML('beforeend', codexPauseNoticeHTML(pause));
   container.insertAdjacentHTML('beforeend', codexUsageSourceNoteHTML(usageSourceNote));
 
@@ -4998,7 +4996,7 @@ async function fetchCodexUsage(options = {}) {
     const sourceNoteChanged = (container.querySelector('.codex-usage-source-note')?.textContent || '') !== sourceNote;
     const pausedChanged = (container.querySelector('.codex-paused-dot') != null) !== Boolean(payload.paused);
     const staleChanged = (container.querySelector('.quota-card.stale-card') != null) !== Boolean(payload.isStale);
-    const resetsChanged = codexResetCreditsKey(container) !== codexResetCreditsKeyFromData(payload.resetCredits);
+    const resetsChanged = container.querySelector('[data-reset-summary]')?.dataset.resetSummary !== codexResetSummaryKey(payload.resetCredits);
     if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged || staleChanged || resetsChanged) {
       renderCodexQuotaCards(visibleQuotas, 'quota-grid-codex', State.codexPlanType, payload.usageSourceNote, payload);
     }
@@ -5092,6 +5090,7 @@ function accountOverviewCardHTML(provider, account, idx) {
       <span class="account-overview-name">${escapeHTML(accountName)}</span>
       ${badge ? `<span class="account-overview-badge">${escapeHTML(badge)}</span>` : ''}
     </header>
+    ${provider === 'codex' ? codexResetSummaryHTML(account.resetCredits) : ''}
     ${provider === 'codex' ? codexUsageSourceNoteHTML(account.usageSourceNote) : ''}
     <div class="account-overview-quotas">${quotaHTML}</div>
     <span class="account-overview-cta">View details &rarr;</span>
