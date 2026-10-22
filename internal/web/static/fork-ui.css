@@ -100,6 +100,8 @@
   .app .footer-links { flex-wrap: wrap; }
   .app .quota-grid, .app .provider-kpis, .app .accounts-overview-grid { grid-template-columns: minmax(0, 1fr); }
   .provider-card-body { padding: 12px; }
+  .cycles-filters-inline { min-width: 0; max-width: 100%; }
+  .cycles-filters-inline .filter-group, .cycles-filters-inline .filter-pills { min-width: 0; flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-sidebar *, .app { transition: none; }
@@ -107,8 +109,10 @@
 
 .provider-card-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .aoq-available { margin-top: 6px; color: var(--text-secondary); font: 500 11px var(--font-mono); }
-.app .auto-start-badge { gap: 2px; padding: 1px 4px; font-size: 9px; line-height: 1.2; vertical-align: middle; }
+.app .auto-start-badge { margin-inline-start: 6px; gap: 2px; padding: 1px 4px; font-size: 9px; line-height: 1.2; vertical-align: middle; }
 .app .auto-start-badge svg { width: 9px; height: 9px; }
+.app .aoq-label { min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; line-height: 1.4; }
+.app .aoq-pct { flex-shrink: 0; }
 .app .table-footer { flex-wrap: wrap; }
-.app .table-pagination { flex-direction: row; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+.app .table-pagination { flex-direction: row; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; padding: 2px 2px 12px; }
 .app .table-pagination .page-btn, .app .table-pagination .page-ellipsis { flex: 0 0 auto; }

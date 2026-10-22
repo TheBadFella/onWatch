@@ -28,8 +28,11 @@ of the chosen usage/available display mode. No cost estimates are inferred.
 
 The fork includes upstream v2.14.14, including Codex reset-credit reporting,
 Cursor usage fixes, provider polling status, and DeepSeek peak-hour information.
-Auto-start badges use a compact label. Table pagination stays in one horizontal
-row, scrolling within the footer when a narrow screen cannot fit every button.
+Auto-start badges use a compact label with space before it. Table pagination
+stays in one horizontal row, scrolling within the footer when a narrow screen
+cannot fit every button. Padding separates page buttons from the scrollbar.
+Account quota labels wrap on narrow screens so their Auto-start badges remain
+visible beside the usage percentage.
 
 Visible dashboards check OnWatch's stored usage every five seconds. Provider
 requests remain in the background agent; opening extra tabs does not multiply
