@@ -10625,6 +10625,11 @@ async function loadSettings() {
       autoRefresh.checked = data.auto_refresh_tokens !== false;
     }
 
+    for (const key of ['hide_connect_prompt', 'hide_smtp_setup_reminder']) {
+      const input = document.getElementById('settings-' + key.replaceAll('_', '-'));
+      if (input) input.checked = data[key] === true;
+    }
+
     // SMTP
     if (data.smtp) {
       const s = data.smtp;
@@ -12466,6 +12471,11 @@ function setupProviderReload() {
 function gatherSettings() {
   if (State.settingsLoaded !== true) throw new Error('Reload this page to load your saved settings before saving.');
   const settings = {};
+
+  for (const key of ['hide_connect_prompt', 'hide_smtp_setup_reminder']) {
+    const input = document.getElementById('settings-' + key.replaceAll('_', '-'));
+    if (input) settings[key] = input.checked;
+  }
 
   // SMTP
   const smtpHost = document.getElementById('smtp-host');
