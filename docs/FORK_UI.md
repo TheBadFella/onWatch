@@ -73,7 +73,15 @@ in its image labels. The running binary uses `<VERSION>+fork.<short-commit>` so
 embedded CSS and JavaScript URLs change with each image. Older overlapping builds
 are canceled to avoid publishing an outdated mutable tag after a newer build.
 
-Routine CI stays Linux-only and runs alongside image delivery. The manual
+UI-only pushes use the image builder's dashboard tests and Linux compilation;
+they do not start a second Go CI job. Backend changes run formatting, cached Go
+vet, and dashboard checks with a five-minute job limit. Test-only and CI-policy
+changes do not rebuild the runtime image. The full Go race/coverage suite runs
+only through the **CI** workflow's **Run workflow** action, with fail-fast enabled
+and a five-minute timeout per test package. Its job has a fifteen-minute limit.
+The extra CI success job has been removed; the Linux job reports its own result.
+
+The manual
 **Release** workflow accepts an existing tag, reuses the same image builder,
 and publishes the Linux AMD64 binary and checksum after the image is available.
 It does not wait for macOS, Windows, ARM emulation, desktop extensions, Homebrew,
