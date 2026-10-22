@@ -467,14 +467,27 @@
             <details class="settings-section settings-disclosure" id="cost-settings">
                 <summary>Costs</summary>
                 <div class="settings-disclosure-body">
-                    <p class="settings-section-desc">Track the monthly subscription fees you pay and estimate API-equivalent cost from token telemetry. Enter your own USD rates per million tokens. No prices or subscription charges are inferred from quota percentages.</p>
+                    <p class="settings-section-desc">Enter a monthly subscription fee once. OnWatch calculates monthly, annualized and daily totals, plus the estimated fee allocated to your current Codex or Claude quota windows. Token telemetry is only needed for the separate API-equivalent cost estimate.</p>
+                    <div class="settings-fields">
+                        <div class="settings-field">
+                            <label for="cost-cad-per-usd">CAD per USD (optional override)</label>
+                            <input id="cost-cad-per-usd" class="settings-input" type="number" min="0.000001" max="100" step="any" placeholder="Automatic: Bank of Canada daily rate">
+                            <span class="settings-field-hint">Leave blank for the latest published daily rate. Enter 1.5 if you want USD 20 to convert to CAD 30. This is a configured planning rate, not a live quote. You can enter the actual monthly CAD amount on each subscription instead.</span>
+                        </div>
+                    </div>
+                    <datalist id="cost-provider-options"><option value="codex"><option value="anthropic"><option value="openai"><option value="openrouter"><option value="gemini"><option value="mistral"></datalist>
+                    <datalist id="cost-account-options"></datalist>
                     <h4 class="settings-subsection-title">Subscriptions</h4>
+                    <p class="settings-section-desc">Use a linked account name. Codex accounts are suggested automatically; the single Claude account is named default. The billing day uses UTC and defaults to the first of the month. Actual CAD fees include any conversion or card charges you choose to enter.</p>
                     <div id="cost-subscription-rows"></div>
                     <button type="button" class="settings-test-btn" id="cost-add-subscription">Add subscription</button>
-                    <h4 class="settings-subsection-title">Model rates</h4>
+                    <p class="settings-section-desc">Quota value is a planning allocation: monthly fee × window duration ÷ billing-period duration × used percentage. Five-hour and weekly limits overlap, so their values must not be added. This does not represent API token spend or an additional charge.</p>
+                    <details class="cost-model-rates">
+                    <summary>Advanced: API-equivalent model rates</summary>
                     <p class="settings-section-desc">Use the provider and exact model ID from API Integrations. Codex telemetry uses provider openai; Claude uses anthropic. Input token totals include cache hits. Missing cache counts leave requests unpriced when cached and regular rates differ. Save Settings applies these rates to all retained telemetry.</p>
                     <div id="cost-rate-rows"></div>
                     <button type="button" class="settings-test-btn" id="cost-add-rate">Add model rate</button>
+                    </details>
                 </div>
             </details>
             <div class="settings-divider"></div>

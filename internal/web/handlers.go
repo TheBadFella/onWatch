@@ -102,6 +102,10 @@ type CodexPauseReporter interface {
 
 // Handler handles HTTP requests for the web dashboard
 type Handler struct {
+	costFXMu           sync.Mutex
+	costFXAttempt      time.Time
+	costFX             *costExchange
+	costFXClient       *http.Client
 	store              *store.Store
 	tracker            *tracker.Tracker
 	zaiTracker         *tracker.ZaiTracker
@@ -7585,6 +7589,7 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result["costs"] = h.loadCostSettings()
+	result["cost_accounts"] = h.costAccounts()
 
 	// SMTP settings (never return the actual password)
 	if h.store != nil {

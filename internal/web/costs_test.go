@@ -47,7 +47,7 @@ func TestCostsSettingsAndMonthScope(t *testing.T) {
 	defer s.Close()
 	h := NewHandler(s, nil, nil, nil, createTestConfigWithSynthetic())
 	rr := httptest.NewRecorder()
-	h.UpdateSettings(rr, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"costs":{"subscriptions":[{"provider":"openai","account":"personal","monthly_usd":20}],"rates":[{"provider":"openai","model":"test","input_per_million":1,"cached_input_per_million":0.1,"output_per_million":2}]}}`)))
+	h.UpdateSettings(rr, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"costs":{"cad_per_usd":1.5,"subscriptions":[{"provider":"openai","account":"personal","monthly_usd":20}],"rates":[{"provider":"openai","model":"test","input_per_million":1,"cached_input_per_million":0.1,"output_per_million":2}]}}`)))
 	if rr.Code != 200 {
 		t.Fatal(rr.Body)
 	}

@@ -1,17 +1,17 @@
 
-## Fork 1.0.0
+## Fork 1.0.1
 
-- Starts the fork's own version series on upstream v2.14.15, including the latest chart and test fixes.
-- Keeps the AMOLED dashboard, collapsible sidebar, account overview, mobile settings and provider connection tools.
-- Adds configurable monthly subscription fees and API-equivalent cost estimates from received token telemetry. Unknown prices and cache counts remain explicitly unpriced.
-- Includes clearer reset evidence, exact reset timestamps, and separate SMTP/webhook event controls.
-- Publishes a Linux AMD64 binary and container image.
+- Enter a subscription fee once to calculate monthly, annualized and daily totals in USD and CAD.
+- Use the actual CAD amount you pay, a configured conversion rate, or a dated Bank of Canada daily rate. Automatic rates are cached across restarts.
+- See the allocated subscription fee used and remaining in each current Codex or Claude quota window, without token telemetry or model prices.
+- Link saved accounts automatically and choose the billing day, including safe handling of short months.
+- Keep API-equivalent token pricing in a separate Advanced section. It remains independent of subscription charges.
 
-### Upgrade and setup
+Quota values are planning allocations, not actual API bills. Five-hour and
+weekly windows overlap and must not be added together. Unknown or stale usage
+is not treated as zero. Existing subscription settings remain compatible.
 
-Existing OnWatch data and provider settings are retained. The version number
-starts again at 1.0.0 for this fork; this is not a rollback to upstream v1.0.0.
-Configure Costs in Settings → General. Token estimates require telemetry, not
-just connected quota accounts. See [cost setup](https://github.com/TheBadFella/onWatch/blob/fork-v1.0.0/docs/FORK_COSTS.md) and the
-[dashboard guide](https://github.com/TheBadFella/onWatch/blob/fork-v1.0.0/docs/FORK_UI.md). Thanks to onllm-dev and the upstream contributors;
-upstream authorship and licensing are preserved.
+See [cost setup, formulas and currency behavior](https://github.com/TheBadFella/onWatch/blob/fork-v1.0.1/docs/FORK_COSTS.md).
+Thanks to the upstream OnWatch contributors. Tokaware and CodexLB's published
+cost-reporting approaches informed the separation of fees and token estimates;
+no third-party source code was copied.
