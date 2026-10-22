@@ -7590,6 +7590,7 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 
 	result["costs"] = h.loadCostSettings()
 	result["cost_accounts"] = h.costAccounts()
+	result["cost_detected_subscriptions"] = h.detectedCostSubscriptions()
 
 	// SMTP settings (never return the actual password)
 	if h.store != nil {

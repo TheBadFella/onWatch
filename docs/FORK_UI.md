@@ -225,8 +225,10 @@ estimates. Quota percentages cannot establish token spend.
 
 ## Subscription-based value calculations
 
-From fork 1.0.1, **Settings → General → Costs** calculates monthly, annualized
+From fork 1.0.2, **Settings → General → Costs** calculates monthly, annualized
 and daily subscription fees in USD/CAD, plus separate current-window quota
-allocations for linked Codex and Claude accounts. Enter the fee once. Token
-telemetry and model prices are only needed for the separate Advanced API-cost
+allocations for linked Codex and Claude accounts. Codex plans and reference
+prices appear automatically, with CAD first and price ranges for unreported
+billing tiers. Price overrides are optional; Claude's unreported plan needs an
+override for pricing. Token telemetry and model prices are only needed for the separate Advanced API-cost
 view. See [cost setup and allocation assumptions](FORK_COSTS.md).

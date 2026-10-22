@@ -12,11 +12,13 @@ import (
 )
 
 type costSubscription struct {
-	Provider   string   `json:"provider"`
-	Account    string   `json:"account"`
-	MonthlyUSD *float64 `json:"monthly_usd"`
-	MonthlyCAD *float64 `json:"monthly_cad,omitempty"`
-	BillingDay int      `json:"billing_day,omitempty"`
+	Provider      string   `json:"provider"`
+	Account       string   `json:"account"`
+	MonthlyUSD    *float64 `json:"monthly_usd"`
+	MonthlyCAD    *float64 `json:"monthly_cad,omitempty"`
+	BillingDay    int      `json:"billing_day,omitempty"`
+	MonthlyMaxUSD *float64 `json:"monthly_max_usd,omitempty"`
+	PriceSource   string   `json:"price_source,omitempty"`
 }
 type costRate struct {
 	Provider string   `json:"provider"`
@@ -128,29 +130,48 @@ func (h *Handler) Costs(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:500]
 	}
 	settings := h.loadCostSettings()
+	settings, unpricedSubscriptions := h.effectiveCostSettings(settings)
 	items, total, unpriced := priceCostUsage(rows, settings)
 	fx := h.costExchange(r.Context(), settings, now)
 	plans := h.subscriptionValues(settings, fx, now)
 	monthly, annual, daily := 0.0, 0.0, 0.0
+	monthlyMax, monthlyMaxCAD := 0.0, 0.0
 	monthlyCAD, annualCAD, dailyCAD := 0.0, 0.0, 0.0
 	cadComplete := true
 	for _, plan := range plans {
 		monthly += plan.MonthlyUSD
+		maximum := plan.MonthlyUSD
+		if plan.MonthlyMaxUSD != nil {
+			maximum = *plan.MonthlyMaxUSD
+		}
+		monthlyMax += maximum
 		annual += plan.AnnualUSD
 		daily += plan.DailyUSD
 		if plan.MonthlyCAD == nil {
 			cadComplete = false
 		} else {
 			monthlyCAD += *plan.MonthlyCAD
+			if plan.MonthlyMaxCAD != nil {
+				monthlyMaxCAD += *plan.MonthlyMaxCAD
+			} else {
+				monthlyMaxCAD += *plan.MonthlyCAD
+			}
 			annualCAD += *plan.AnnualCAD
 			dailyCAD += *plan.DailyCAD
 		}
 	}
 	result := map[string]interface{}{"month_start": start, "as_of": now, "subscriptions": settings.Subscriptions, "subscription_values": plans, "subscription_monthly_usd": monthly, "subscription_annual_usd": annual, "subscription_daily_usd": daily, "estimated_api_usd": total, "usage": items, "unpriced_requests": unpriced, "truncated": truncated, "exchange": fx}
+	result["unpriced_subscriptions"] = unpricedSubscriptions
+	result["subscription_monthly_max_usd"] = monthlyMax
+	result["subscription_annual_max_usd"] = monthlyMax * 12
+	result["display_currency"] = "CAD"
+	result["price_catalog_date"] = "2026-10-22"
 	if cadComplete && len(plans) > 0 {
 		result["subscription_monthly_cad"] = monthlyCAD
 		result["subscription_annual_cad"] = annualCAD
 		result["subscription_daily_cad"] = dailyCAD
+		result["subscription_monthly_max_cad"] = monthlyMaxCAD
+		result["subscription_annual_max_cad"] = monthlyMaxCAD * 12
 	}
 	if fx != nil {
 		result["estimated_api_cad"] = total * fx.CADPerUSD
