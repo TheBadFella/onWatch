@@ -21,14 +21,14 @@ import (
 )
 
 const (
-	githubReleasesURL     = "https://api.github.com/repos/onllm-dev/onwatch/releases/latest"
-	githubReleasesListURL = "https://api.github.com/repos/onllm-dev/onwatch/releases"
+	githubReleasesURL     = "https://api.github.com/repos/TheBadFella/onWatch/releases/latest"
+	githubReleasesListURL = "https://api.github.com/repos/TheBadFella/onWatch/releases"
 	// githubReleasesRedirectURL is the github.com (NOT api.github.com) web
 	// endpoint that 302-redirects to the newest release's tag page. It is not
 	// subject to the REST API's 60-req/hr unauthenticated rate limit, so it is
 	// our fallback when the API returns 403 (see issue #81).
-	githubReleasesRedirectURL = "https://github.com/onllm-dev/onwatch/releases/latest"
-	downloadBaseURL           = "https://github.com/onllm-dev/onwatch/releases/download"
+	githubReleasesRedirectURL = "https://github.com/TheBadFella/onWatch/releases/latest"
+	downloadBaseURL           = "https://github.com/TheBadFella/onWatch/releases/download"
 	defaultCacheTTL           = 1 * time.Hour
 	downloadTimeout           = 10 * time.Minute
 	downloadRetryBackoff      = 2 * time.Second
@@ -151,7 +151,7 @@ func (u *Updater) Check() (UpdateInfo, error) {
 		return info, err
 	}
 
-	latest := strings.TrimPrefix(tagName, "v")
+	latest := strings.TrimPrefix(strings.TrimPrefix(tagName, "fork-"), "v")
 
 	// Update cache
 	u.mu.Lock()
@@ -283,7 +283,7 @@ func (u *Updater) fetchTagFromRedirect() (string, error) {
 		return "", fmt.Errorf("update.Check: releases/latest redirect returned no Location (HTTP %d)", resp.StatusCode)
 	}
 
-	// Location looks like https://github.com/onllm-dev/onwatch/releases/tag/v2.12.4
+	// Location looks like https://github.com/TheBadFella/onWatch/releases/tag/v2.12.4
 	const marker = "/releases/tag/"
 	idx := strings.LastIndex(loc, marker)
 	if idx < 0 {
@@ -814,7 +814,7 @@ func (u *Updater) binaryDownloadURL(version string) string {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	return fmt.Sprintf("%s/v%s/%s", u.downloadURL, version, name)
+	return fmt.Sprintf("%s/fork-v%s/%s", u.downloadURL, version, name)
 }
 
 // compareVersions compares two semver strings.

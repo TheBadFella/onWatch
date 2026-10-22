@@ -244,6 +244,7 @@ func TestDashboardPeakChipRendering(t *testing.T) {
 const assert = require('node:assert/strict');
 const peak = require(` + jsStringLiteral(t, helperPath) + `);
 global.window = { OnWatchPeak: peak };
+global.document = { addEventListener() {} };
 function escapeHTML(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
 function formatNumber(value) { return String(value); }
 function formatResetTime() { return "1h"; }
@@ -274,7 +275,7 @@ const freeze = (iso) => {
     static now() { return fixed; }
   };
 };
-` + metaSlice + `
+` + readStaticFile(t, "static/fork-ui.js") + "\n" + metaSlice + `
 ` + kpiSlice + `
 ` + balanceSlice + `
 freeze("2026-10-22T07:50:00Z");

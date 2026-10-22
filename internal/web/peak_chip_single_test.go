@@ -55,7 +55,7 @@ const getComputedStyle=()=>({getPropertyValue:()=>''});
 console.warn=()=>{};
 const peakHelper=require(` + jsStringLiteral(t, peakHelperPath) + `);
 window.OnWatchPeak=peakHelper;
-` + string(source) + `
+` + readStaticFile(t, "static/fork-ui.js") + "\n" + string(source) + `
 const chipCount = (html) => (String(html).match(/peak-chip-wrap/g) || []).length;
 
 // Individual provider views: one chip per grid.

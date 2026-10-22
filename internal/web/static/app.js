@@ -2,7 +2,7 @@
 
 const BASE_PATH = (document.querySelector('meta[name="base-path"]') || {}).content || '';
 const API_BASE = BASE_PATH;
-const REFRESH_INTERVAL = 120000;
+const REFRESH_INTERVAL = 5000;
 
 // ── Lazy Loading via IntersectionObserver ──
 const _lazyLoaded = new Set();
@@ -326,6 +326,7 @@ function populateCodexProfileTabs() {
   allItem.dataset.accountId = 'all';
   allItem.textContent = 'All accounts';
   allItem.setAttribute('role', 'option');
+  allItem.tabIndex = -1;
   allItem.setAttribute('aria-selected', State.codexAccount === 'all' ? 'true' : 'false');
   allItem.addEventListener('click', () => {
     switchCodexProfile('all');
@@ -339,6 +340,7 @@ function populateCodexProfileTabs() {
     li.dataset.accountId = profile.id;
     li.textContent = profile.name;
     li.setAttribute('role', 'option');
+    li.tabIndex = -1;
     li.setAttribute('aria-selected', profile.id === State.codexAccount ? 'true' : 'false');
     li.addEventListener('click', () => {
       switchCodexProfile(profile.id);
@@ -362,6 +364,7 @@ function switchCodexProfile(accountId) {
   State.codexAccount = accountId;
   saveCodexAccount(accountId);
   updateProfileTabsActive();
+  updateCodexProfileTabsVisibility();
   refreshAll();
 }
 
@@ -377,6 +380,12 @@ function updateProfileTabsActive() {
       const activeProfile = State.codexProfiles.find(p => p.id === State.codexAccount);
       if (activeProfile) label.textContent = activeProfile.name;
     }
+  }
+
+  const trigger = document.getElementById('codex-profile-trigger');
+  if (trigger && label) {
+    trigger.title = 'Codex: ' + label.textContent + ' (' + State.codexProfiles.length + ' accounts)';
+    trigger.setAttribute('aria-label', 'Switch ' + trigger.title);
   }
 
   menu.querySelectorAll('.codex-profile-item').forEach(item => {
@@ -401,7 +410,7 @@ function updateCodexProfileTabsVisibility() {
   if (!dropdown) return;
 
   const provider = getCurrentProvider();
-  const show = provider === 'codex' && State.codexProfiles.length > 1;
+  const show = provider === 'codex' && State.codexProfiles.length > 1 && State.codexAccount !== 'all';
   dropdown.style.display = show ? '' : 'none';
 }
 
@@ -524,6 +533,7 @@ function populateMiniMaxAccountTabs() {
   allItem.dataset.accountId = 'all';
   allItem.textContent = 'All accounts';
   allItem.setAttribute('role', 'option');
+  allItem.tabIndex = -1;
   allItem.setAttribute('aria-selected', State.minimaxAccount === 'all' ? 'true' : 'false');
   allItem.addEventListener('click', () => {
     switchMiniMaxAccount('all');
@@ -537,6 +547,7 @@ function populateMiniMaxAccountTabs() {
     li.dataset.accountId = account.id;
     li.textContent = account.name;
     li.setAttribute('role', 'option');
+    li.tabIndex = -1;
     li.setAttribute('aria-selected', account.id === State.minimaxAccount ? 'true' : 'false');
     li.addEventListener('click', () => {
       switchMiniMaxAccount(account.id);
@@ -559,6 +570,7 @@ function switchMiniMaxAccount(accountId) {
   State.minimaxAccount = accountId;
   saveMiniMaxAccount(accountId);
   updateMiniMaxAccountTabsActive();
+  updateMiniMaxAccountTabsVisibility();
   refreshAll();
 }
 
@@ -597,7 +609,7 @@ function updateMiniMaxAccountTabsVisibility() {
   if (!dropdown) return;
 
   const provider = getCurrentProvider();
-  const show = provider === 'minimax' && State.minimaxAccounts && State.minimaxAccounts.length > 1;
+  const show = provider === 'minimax' && State.minimaxAccounts && State.minimaxAccounts.length > 1 && State.minimaxAccount !== 'all';
   dropdown.style.display = show ? '' : 'none';
 }
 
@@ -2820,8 +2832,7 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
   const container = document.getElementById(containerId);
   if (!container) return;
   const visibleQuotas = filterCodexQuotasForPlan(quotas, planType);
-  const resetsHTML = codexResetCreditsHTML(pause && pause.resetCredits);
-  const sourceNoteHTML = codexPauseNoticeHTML(pause) + codexUsageSourceNoteHTML(usageSourceNote);
+  const sourceNoteHTML = codexPauseNoticeHTML(pause) + codexUsageSourceNoteHTML(usageSourceNote) + codexResetSummaryHTML(pause && pause.resetCredits);
   if (visibleQuotas.length === 0) {
     container.innerHTML = `${sourceNoteHTML}<p class="empty-state">No Codex quota data available yet.</p>`;
     return;
@@ -2847,7 +2858,6 @@ function renderCodexQuotaCards(quotas, containerId, planType, usageSourceNote, p
           <svg class="quota-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
           ${displayName}
           ${codexAutoStartBadge(q.name)}
-          ${i === 0 ? resetsHTML : ''}
         </h2>
         <span class="countdown" id="${countdownId}">${q.timeUntilResetSeconds > 0 ? formatDuration(q.timeUntilResetSeconds) : '--:--'}</span>
       </header>
@@ -2915,11 +2925,11 @@ function renderCodexQuotaCardsForAccount(quotas, container, accountName, planTyp
   header.innerHTML = `
     <span class="codex-account-name">${escapeHTML(accountName)}</span>
     <span class="codex-account-meta">
-      ${codexResetCreditsHTML(pause && pause.resetCredits)}
       <span class="codex-account-plan">${escapeHTML(formatCodexPlan(planType, planLabel))}</span>
     </span>
   `;
   container.appendChild(header);
+  container.insertAdjacentHTML('beforeend', codexResetSummaryHTML(pause && pause.resetCredits));
   container.insertAdjacentHTML('beforeend', codexPauseNoticeHTML(pause));
   container.insertAdjacentHTML('beforeend', codexUsageSourceNoteHTML(usageSourceNote));
 
@@ -4694,7 +4704,7 @@ function updateCommandCodeCard(quota) {
   }
 }
 
-async function fetchCurrent() {
+async function fetchCurrent(onlyIfChanged = false) {
   const requestProvider = getCurrentProvider();
   const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
   const requestSeq = (State.currentRequestSeq || 0) + 1;
@@ -4702,7 +4712,7 @@ async function fetchCurrent() {
 
   syncAccountsOverviewLayout();
   if (isAccountsOverviewMode(requestProvider)) {
-    await fetchAccountsOverview(requestProvider, requestSeq);
+    await fetchAccountsOverview(requestProvider, requestSeq, onlyIfChanged);
     return;
   }
 
@@ -4718,6 +4728,8 @@ async function fetchCurrent() {
       requestAnimationFrame(() => {
         if (State.currentRequestSeq !== requestSeq) return;
         if (getCurrentProvider() !== requestProvider) return;
+        document.getElementById('status-dot')?.classList.remove('stale');
+        if (!shouldRenderLiveData('api-integrations', {currentData, healthData}, !onlyIfChanged)) return;
         State.apiIntegrationsCurrent = currentData;
         State.apiIntegrationsHealth = healthData;
         renderAPIIntegrationsCards();
@@ -4755,6 +4767,8 @@ async function fetchCurrent() {
       if (getCurrentProvider() !== requestProvider) return;
       if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
 
+      document.getElementById('status-dot')?.classList.remove('stale');
+      if (!shouldRenderLiveData(`${requestProvider}:${requestAccount}`, {data, apiIntegrationsCurrentData, apiIntegrationsHealthData}, !onlyIfChanged)) return;
       const provider = requestProvider;
       if (provider === 'both') {
         if (apiIntegrationsCurrentData || apiIntegrationsHealthData) {
@@ -4788,6 +4802,7 @@ async function fetchCurrent() {
           }
         }
       } else if (provider === 'codex') {
+        renderCodexResetHistory([{...data, accountId: requestAccount, accountName: State.codexProfiles.find(p => p.id === requestAccount)?.name || data.accountName || 'Codex account'}]);
         fetchCodexUsage({ mode: 'codex', data });
       } else if (provider === 'antigravity') {
         // Antigravity response: { capturedAt: ..., quotas: [...], source: 'cli'|'ide' }
@@ -4994,7 +5009,7 @@ async function fetchCodexUsage(options = {}) {
     const sourceNoteChanged = (container.querySelector('.codex-usage-source-note')?.textContent || '') !== sourceNote;
     const pausedChanged = (container.querySelector('.codex-paused-dot') != null) !== Boolean(payload.paused);
     const staleChanged = (container.querySelector('.quota-card.stale-card') != null) !== Boolean(payload.isStale);
-    const resetsChanged = codexResetCreditsKey(container) !== codexResetCreditsKeyFromData(payload.resetCredits);
+    const resetsChanged = container.querySelector('[data-reset-summary]')?.dataset.resetSummary !== codexResetSummaryKey(payload.resetCredits);
     if (container.children.length === 0 || renderedCount !== visibleQuotas.length || planChanged || quotaNamesChanged || sourceNoteChanged || pausedChanged || staleChanged || resetsChanged) {
       renderCodexQuotaCards(visibleQuotas, 'quota-grid-codex', State.codexPlanType, payload.usageSourceNote, payload);
     }
@@ -5041,6 +5056,7 @@ function accountOverviewQuotas(provider, account) {
       percent: typeof q.usagePercent === 'number' ? q.usagePercent : 0,
       status: q.status || 'healthy',
       resetAt: q.resetAt || null,
+      remaining: typeof q.usagePercent === 'number' ? Math.max(0, 100 - q.usagePercent) : null,
     }));
   }
   const visible = filterCodexQuotasForPlan(account.quotas || [], account.planType);
@@ -5050,6 +5066,7 @@ function accountOverviewQuotas(provider, account) {
     percent: typeof q.cardPercent === 'number' ? q.cardPercent : (q.utilization || 0),
     status: q.status || 'healthy',
     resetAt: q.resetsAt || null,
+    remaining: typeof q.utilization === 'number' ? Math.max(0, 100 - q.utilization) : null,
   }));
 }
 
@@ -5076,18 +5093,22 @@ function accountOverviewCardHTML(provider, account, idx) {
           <div class="progress-bar" role="progressbar" aria-valuenow="${Math.round(r.percent)}" aria-valuemin="0" aria-valuemax="100">
             <div class="progress-fill" style="width: ${pct}%" data-status="${r.status}"></div>
           </div>
-          ${reset ? `<div class="aoq-reset" data-reset-at="${r.resetAt}">${reset}</div>` : ''}
+          ${r.remaining !== null ? `<div class="aoq-available">${r.remaining.toFixed(1)}% available</div>` : ''}
+          <div class="aoq-reset-row">${overviewResetHTML(r.resetAt)}${reset ? `<span class="aoq-reset" data-reset-at="${escapeHTML(r.resetAt)}">${escapeHTML(reset)}</span>` : ''}</div>
         </div>`;
       }).join('');
 
-  return `<article class="account-overview-card" data-account-id="${accountId}" data-provider="${provider}" role="button" tabindex="0" aria-label="Open ${escapeHTML(accountName)} details">
+  return `<article class="account-overview-card" data-account-id="${accountId}" data-provider="${provider}" aria-label="${escapeHTML(accountName)} account">
     <header class="account-overview-header">
       <span class="account-overview-name">${escapeHTML(accountName)}</span>
       ${badge ? `<span class="account-overview-badge">${escapeHTML(badge)}</span>` : ''}
     </header>
+    ${accountConnectionHTML(account)}
+    ${provider === 'codex' ? codexResetSummaryHTML(account.resetCredits) : ''}
     ${provider === 'codex' ? codexUsageSourceNoteHTML(account.usageSourceNote) : ''}
     <div class="account-overview-quotas">${quotaHTML}</div>
-    <span class="account-overview-cta">View details &rarr;</span>
+    <div class="account-overview-actions"><button type="button" class="account-overview-cta" aria-label="Open ${escapeHTML(accountName)} details">View details &rarr;</button>
+    ${provider === 'codex' && (account.paused || account.authRequired) ? `<button type="button" class="connect-primary" data-codex-connect data-profile-name="${escapeHTML(accountName)}">Reconnect</button>` : ''}</div>
   </article>`;
 }
 
@@ -5101,7 +5122,16 @@ function renderAccountsOverview(provider, accounts) {
     return;
   }
 
-  container.innerHTML = accounts.map((account, idx) => accountOverviewCardHTML(provider, account, idx)).join('');
+  const html = accounts.map((account, idx) => accountOverviewCardHTML(provider, account, idx)).join('');
+  const existing = [...container.querySelectorAll('.account-overview-card')];
+  const accountIds = accounts.map((account, idx) => String(account.accountId || account.id || idx + 1));
+  if (existing.length === accounts.length && existing.every((card, idx) => card.dataset.accountId === accountIds[idx])) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    [...template.content.children].forEach((card, idx) => patchOverviewNode(existing[idx], card));
+    return;
+  }
+  container.innerHTML = html;
 
   const drill = (accountId) => {
     if (provider === 'minimax') switchMiniMaxAccount(accountId);
@@ -5109,15 +5139,14 @@ function renderAccountsOverview(provider, accounts) {
   };
   container.querySelectorAll('.account-overview-card').forEach(card => {
     const accountId = parseInt(card.dataset.accountId, 10);
-    card.addEventListener('click', () => drill(accountId));
-    card.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drill(accountId); }
+    card.addEventListener('click', event => {
+      if (!event.target.closest('[data-codex-connect]')) drill(accountId);
     });
   });
 }
 
 // Fetch all accounts for a provider and render the overview cards.
-async function fetchAccountsOverview(provider, requestSeq) {
+async function fetchAccountsOverview(provider, requestSeq, onlyIfChanged = false) {
   const endpoint = provider === 'minimax'
     ? `${API_BASE}/api/minimax/accounts/usage`
     : `${API_BASE}/api/codex/accounts/usage`;
@@ -5131,8 +5160,11 @@ async function fetchAccountsOverview(provider, requestSeq) {
       if (State.currentRequestSeq !== requestSeq) return;
       if (getCurrentProvider() !== provider) return;
       if (!isAccountsOverviewMode(provider)) return;
+      document.getElementById('status-dot')?.classList.remove('stale');
+      if (!shouldRenderLiveData(`${provider}:accounts`, accounts, !onlyIfChanged)) return;
       State.accountsOverview = { provider, accounts };
       renderAccountsOverview(provider, accounts);
+      if (provider === 'codex') renderCodexResetHistory(accounts);
       setLastUpdated();
       const statusDot = document.getElementById('status-dot');
       if (statusDot) statusDot.classList.remove('stale');
@@ -7091,7 +7123,7 @@ function normalizeBothQuotas(provider, payload) {
       cardLabel: quota.cardLabel || 'Utilization',
       status: quota.status || 'healthy',
       timeUntilResetSeconds: quota.timeUntilResetSeconds || 0,
-      resetsAt: quota.resetsAt || quota.renewsAt || quota.resets_at || quota.resetAt || '',
+      resetsAt: quota.resetsAt || quota.renewsAt || quota.resets_at || quota.resetAt || quota.resetTime || quota.resetDate || '',
     };
   });
 }
@@ -7326,7 +7358,7 @@ function renderProviderKPIHTML(quotas, provider) {
       || '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>';
     const resetText = quota.resetsAt ? formatResetTime(quota.resetsAt) : '';
     const resetAttr = quota.resetsAt ? ` data-reset-at="${escapeHTML(quota.resetsAt)}"` : '';
-    const countdown = quota.timeUntilResetSeconds > 0 ? formatDuration(quota.timeUntilResetSeconds) : '--:--';
+    const countdown = overviewResetHTML(quota.resetsAt, quota.timeUntilResetSeconds);
 
     return `<article class="quota-card provider-kpi-card" data-quota="${escapeHTML(quota.name || '')}">
       <header class="card-header">
@@ -7339,7 +7371,7 @@ function renderProviderKPIHTML(quotas, provider) {
           ${index === 0 ? peakChipHTML(provider) : ''}
           ${subtitle ? `<div class="quota-subtitle">${escapeHTML(subtitle)}</div>` : ''}
         </div>
-        <span class="countdown">${escapeHTML(countdown)}</span>
+        ${countdown}
       </header>
       <div class="progress-stats">
         <span class="usage-percent">${percent.toFixed(1)}%</span>
@@ -7959,11 +7991,12 @@ function renderAllProvidersView() {
           <span>${escapeHTML(entry.title)}</span>
           ${badge}${peak}${staleMark}
         </div>
+        <div class="provider-card-actions">${providerResetHTML(entry)}
         <button class="provider-card-collapse-btn" type="button" data-card-key="${entry.cardKey}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHTML(entry.title)}">
           <svg class="provider-card-collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="m9 6 6 6-6 6"/>
           </svg>
-        </button>
+        </button></div>
       </header>`;
     if (Array.isArray(entry.accountsGroup)) {
       const cards = entry.accountsGroup
@@ -8002,9 +8035,8 @@ function renderAllProvidersView() {
       saveDefaultProvider(provider);
       window.location.href = `${BASE_PATH}/?provider=${provider}`;
     };
-    card.addEventListener('click', go);
-    card.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    card.addEventListener('click', event => {
+      if (!event.target.closest('[data-codex-connect]')) go();
     });
   });
 
@@ -9802,6 +9834,8 @@ function setupPasswordToggle() {
       const isVisible = input.type === 'text';
       input.type = isVisible ? 'password' : 'text';
       toggle.classList.toggle('showing', !isVisible);
+      toggle.setAttribute('aria-label', isVisible ? 'Show password' : 'Hide password');
+      toggle.setAttribute('aria-pressed', String(!isVisible));
     });
   }
 }
@@ -10271,6 +10305,9 @@ function setupProviderSelector() {
     tab.addEventListener('click', () => {
       const provider = tab.dataset.provider;
       saveDefaultProvider(provider);
+      // Provider navigation always starts at its account overview.
+      if (provider === 'codex') saveCodexAccount('all');
+      if (provider === 'minimax') saveMiniMaxAccount('all');
       window.location.href = `${BASE_PATH}/?provider=${provider}`;
     });
   });
@@ -10335,14 +10372,31 @@ function setupCardModals() {
 
 function startAutoRefresh() {
   if (State.refreshInterval) clearInterval(State.refreshInterval);
-  State.refreshInterval = setInterval(() => {
-    // Always refresh above-fold data
-    fetchCurrent(); fetchDeepInsights(); fetchHistory();
-    // Only refresh below-fold sections that have been loaded
-    if (shouldShowCyclesTable() && _lazyLoaded.has('.cycles-section')) fetchCycles();
-    if (shouldShowOverviewTable() && _lazyLoaded.has('.cycle-overview-section')) fetchCycleOverview();
-    if (shouldShowSessionsTable() && _lazyLoaded.has('.sessions-section')) fetchSessions();
-  }, REFRESH_INTERVAL);
+  if (State.autoRefreshVisibilityHandler) {
+    document.removeEventListener('visibilitychange', State.autoRefreshVisibilityHandler);
+  }
+  let refreshing = false;
+  let lastHistoryRefresh = Date.now();
+  const refresh = async () => {
+    if (document.hidden || refreshing) return;
+    refreshing = true;
+    try {
+      const requests = [fetchCurrent(true)];
+      if (Date.now() - lastHistoryRefresh >= 60000) {
+        lastHistoryRefresh = Date.now();
+        requests.push(fetchDeepInsights(), fetchHistory());
+        if (shouldShowCyclesTable() && _lazyLoaded.has('.cycles-section')) requests.push(fetchCycles());
+        if (shouldShowOverviewTable() && _lazyLoaded.has('.cycle-overview-section')) requests.push(fetchCycleOverview());
+        if (shouldShowSessionsTable() && _lazyLoaded.has('.sessions-section')) requests.push(fetchSessions());
+      }
+      await Promise.allSettled(requests);
+    } finally {
+      refreshing = false;
+    }
+  };
+  State.refreshInterval = setInterval(refresh, REFRESH_INTERVAL);
+  State.autoRefreshVisibilityHandler = () => document.hidden ? undefined : refresh();
+  document.addEventListener('visibilitychange', State.autoRefreshVisibilityHandler);
   // Peak chips count down from the page clock, so their 30s ticker makes no
   // API calls and keeps the state in step between refreshes.
   if (State.peakTickInterval) clearInterval(State.peakTickInterval);
@@ -10474,6 +10528,8 @@ function isSettingsPage() {
 }
 
 async function initSettingsPage() {
+  const save = document.getElementById('settings-save-btn');
+  if (save) save.disabled = true;
   setupSettingsTabs();
   // The password form does not depend on loaded settings. Wire it before the
   // awaits below, or a click during a slow load silently does nothing.
@@ -10569,10 +10625,13 @@ async function setupMenubarSettings() {
 }
 
 async function loadSettings() {
+  State.settingsLoaded = false;
   try {
     const resp = await authFetch('/api/settings');
-    if (!resp.ok) return;
+    if (!resp.ok) throw new Error('Could not load settings');
     const data = await resp.json();
+
+    if (typeof loadCostSettings === 'function') loadCostSettings(data.costs);
 
     // Timezone
     const tzSelect = document.getElementById('settings-timezone');
@@ -10588,6 +10647,11 @@ async function loadSettings() {
     const autoRefresh = document.getElementById('settings-auto-refresh-tokens');
     if (autoRefresh) {
       autoRefresh.checked = data.auto_refresh_tokens !== false;
+    }
+
+    for (const key of ['hide_connect_prompt', 'hide_smtp_setup_reminder']) {
+      const input = document.getElementById('settings-' + key.replaceAll('_', '-'));
+      if (input) input.checked = data[key] === true;
     }
 
     // SMTP
@@ -10608,9 +10672,16 @@ async function loadSettings() {
       }
     }
 
+    const emailEvents = data.smtp?.events;
+    ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'].forEach(event => {
+      const input = document.getElementById('smtp-event-' + event.replaceAll('_', '-'));
+      if (input) input.checked = emailEvents ? emailEvents[event] === true : ['warning', 'critical', 'reset', 'auth_error', 'reset_credit_expiry'].includes(event);
+    });
+
     // Notifications
     if (data.notifications) {
       const n = data.notifications;
+      setVal('reset-soon-minutes', n.reset_soon_minutes ?? 15);
       setVal('threshold-warning', n.warning_threshold);
       setVal('threshold-warning-slider', n.warning_threshold);
       setVal('threshold-critical', n.critical_threshold);
@@ -10672,8 +10743,9 @@ async function loadSettings() {
     await populateProviderToggles(data.provider_visibility || {});
     await populateDashboardTabOrder();
     await populateMenubarSettings(data.menubar || {});
+    State.settingsLoaded = true;
   } catch (e) {
-    // Settings load failed silently
+    showSettingsFeedback(document.getElementById('settings-feedback'), 'Settings could not be loaded. Reload this page before saving; your saved settings have not been changed.', 'error');
   }
 }
 
@@ -12008,6 +12080,7 @@ async function openProviderSettingsModal(providerKey) {
 
     // Build the full body with profiles section first, then settings fields
     bodyEl.innerHTML = profilesHTML + buildFieldsHTML();
+    window.installCodexAuthActions?.();
 
     // Fetch and render profiles
     const profilesList = document.getElementById('codex-profiles-list');
@@ -12017,7 +12090,7 @@ async function openProviderSettingsModal(providerKey) {
         const data = await res.json();
         const profiles = Array.isArray(data.profiles) ? data.profiles : [];
         if (profiles.length === 0) {
-          profilesList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;margin:0">No profiles saved. Save your first profile using the CLI: <code>onwatch codex profile save &lt;name&gt;</code></p>';
+          profilesList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;margin:0">No accounts connected yet. Select Connect Codex account to sign in with your browser.</p>';
         } else {
           let html = '';
           profiles.forEach(profile => {
@@ -12029,6 +12102,7 @@ async function openProviderSettingsModal(providerKey) {
             html += `</div>`;
             html += `<div style="display:flex;gap:8px">`;
             if (!isDeleted) {
+              html += `<button type="button" class="connect-primary" data-codex-connect data-profile-name="${escapeHtml(profile.name)}">Reconnect</button>`;
               html += `<button class="codex-profile-action-btn" data-action="refresh" data-name="${escapeHtml(profile.name)}" title="Refresh from current auth.json" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer">Refresh</button>`;
             }
             html += `<button class="codex-profile-action-btn" data-action="delete" data-name="${escapeHtml(profile.name)}" title="Delete profile" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:${isDeleted ? 'var(--text-disabled)' : 'var(--md-error,#b3261e)'}">Delete</button>`;
@@ -12420,12 +12494,22 @@ function setupProviderReload() {
 }
 
 function gatherSettings() {
+  if (State.settingsLoaded !== true) throw new Error('Reload this page to load your saved settings before saving.');
   const settings = {};
+  if (typeof collectCostSettings === 'function') settings.costs = collectCostSettings();
+
+  for (const key of ['hide_connect_prompt', 'hide_smtp_setup_reminder']) {
+    const input = document.getElementById('settings-' + key.replaceAll('_', '-'));
+    if (input) settings[key] = input.checked;
+  }
 
   // SMTP
   const smtpHost = document.getElementById('smtp-host');
   if (smtpHost) {
     settings.smtp = {
+      events: Object.fromEntries(['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'].map(event => [
+        event, document.getElementById('smtp-event-' + event.replaceAll('_', '-'))?.checked ?? false,
+      ])),
       host: smtpHost.value.trim(),
       port: parseInt(document.getElementById('smtp-port')?.value) || 587,
       protocol: document.getElementById('smtp-protocol')?.value || 'auto',
@@ -12456,6 +12540,7 @@ function gatherSettings() {
     });
 
     settings.notifications = {
+      reset_soon_minutes: parseInt(document.getElementById('reset-soon-minutes')?.value ?? '15', 10),
       warning_threshold: parseFloat(warningInput.value) || 80,
       critical_threshold: parseFloat(document.getElementById('threshold-critical')?.value) || 95,
       notify_warning: document.getElementById('notify-warning')?.checked ?? true,
@@ -12553,6 +12638,7 @@ function setupSettingsSave() {
   const saveBtn = document.getElementById('settings-save-btn');
   const feedback = document.getElementById('settings-feedback');
   if (!saveBtn) return;
+  saveBtn.disabled = State.settingsLoaded !== true;
 
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
@@ -12717,6 +12803,8 @@ function loadWebhookSettings(webhook) {
 
   const events = w.events || {};
   const eventFields = {
+    'webhook-event-exhausted': 'exhausted',
+    'webhook-event-reset-soon': 'reset_soon',
     'webhook-event-warning': 'warning',
     'webhook-event-critical': 'critical',
     'webhook-event-reset': 'reset',
@@ -12753,6 +12841,8 @@ function collectWebhookSettings() {
     timeout_seconds: parseInt(document.getElementById('webhook-timeout')?.value) || 5,
     retries: parseInt(document.getElementById('webhook-retries')?.value ?? '2') || 0,
     events: {
+      exhausted: document.getElementById('webhook-event-exhausted')?.checked ?? false,
+      reset_soon: document.getElementById('webhook-event-reset-soon')?.checked ?? false,
       warning: document.getElementById('webhook-event-warning')?.checked ?? false,
       critical: document.getElementById('webhook-event-critical')?.checked ?? false,
       reset: document.getElementById('webhook-event-reset')?.checked ?? false,
@@ -12764,14 +12854,15 @@ function collectWebhookSettings() {
   };
 }
 
-// The webhook block is the tallest section on the Notifications tab, so it only
-// unfolds once the channel is switched on. The fields keep their values while
-// hidden, so toggling the channel back on restores whatever was typed.
+// Keep configuration accessible while the channel is off, without changing
+// whether the user has expanded the disclosure.
 function syncWebhookConfigVisibility() {
   const section = document.getElementById('webhook-config-section');
   const toggle = document.getElementById('channel-webhook');
   if (!section || !toggle) return;
-  section.hidden = !toggle.checked;
+  section.hidden = false;
+  const status = section.querySelector('[data-channel-status]');
+  if (status) status.textContent = toggle.checked ? 'Enabled' : 'Off';
 }
 
 function setupWebhookConfigDisclosure() {
@@ -13437,6 +13528,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Settings page has its own initialization
+  if (document.querySelector('.login-form')) {
+    initTheme();
+    setupPasswordToggle();
+    return;
+  }
+
   if (isSettingsPage()) {
     initTheme();
     initLayoutToggle();

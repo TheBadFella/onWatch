@@ -1,0 +1,14 @@
+# Runtime-only package for the cached Linux build in fork-image.yml.
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -g 65532 -S nonroot && \
+    adduser -u 65532 -S -G nonroot -h /app nonroot && \
+    mkdir -p /data && chown 65532:65532 /data
+WORKDIR /app
+COPY --chmod=0755 dist/onwatch-linux-amd64 /app/onwatch
+ENV ONWATCH_DB_PATH=/data/onwatch.db \
+    ONWATCH_PORT=9211 \
+    ONWATCH_LOG_LEVEL=info
+EXPOSE 9211
+USER nonroot
+ENTRYPOINT ["/app/onwatch"]

@@ -1,5 +1,10 @@
 # onWatch
 
+This fork starts its own version history at **1.0.0**, based on upstream
+**v2.14.15**. It ships Linux AMD64 builds. See the [fork guide](docs/FORK_UI.md)
+and [cost tracking setup](docs/FORK_COSTS.md). Upstream project links and credits
+are retained below.
+
 **Free, open-source AI API quota monitoring for developers.**
 
 Track usage across [Synthetic](https://synthetic.new), [Z.ai](https://z.ai), [Anthropic](https://anthropic.com), [Codex](https://openai.com/codex), [GitHub Copilot](https://github.com/features/copilot), [MiniMax](https://platform.minimax.io), [Gemini CLI](docs/GEMINI_SETUP.md) (legacy), [Cursor](docs/CURSOR_SETUP.md), [Grok](docs/GROK_SETUP.md), [Kimi Code](docs/KIMI_SETUP.md), and Antigravity in one place.
@@ -19,7 +24,7 @@ See history, get alerts, and open a local web dashboard before you hit throttlin
 
 **Compatibility & Docs**
 
-[![Version](https://img.shields.io/badge/Version-v2.14.15-0EA5E9?style=for-the-badge)](https://github.com/onllm-dev/onwatch/releases/tag/v2.14.15)
+[![Version](https://img.shields.io/badge/Version-v1.0.0-0EA5E9?style=for-the-badge)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.0.0)
 [![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/onllm-dev.onwatch.svg?style=for-the-badge&label=VS%20Code&logo=visualstudiocode&logoColor=white&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=onllm-dev.onwatch)
 [![Go 1.25+](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
 [![Platform](https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-orange?style=for-the-badge&logo=apple&logoColor=white)](#quick-start)

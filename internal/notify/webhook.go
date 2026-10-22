@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/onllm-dev/onwatch/v2/internal/store"
 )
 
 // Webhook delivery is deliberately synchronous: notifications are deduplicated
@@ -67,6 +69,8 @@ type WebhookConfig struct {
 
 // WebhookEvents controls which events are delivered to the webhook endpoint.
 type WebhookEvents struct {
+	Exhausted         bool `json:"exhausted"`
+	ResetSoon         bool `json:"reset_soon"`
 	Warning           bool `json:"warning"`
 	Critical          bool `json:"critical"`
 	Reset             bool `json:"reset"`
@@ -79,6 +83,10 @@ type WebhookEvents struct {
 // Enabled reports whether the named event should be delivered.
 func (e WebhookEvents) Enabled(event string) bool {
 	switch event {
+	case EventExhausted:
+		return e.Exhausted
+	case EventResetSoon:
+		return e.ResetSoon
 	case EventWarning:
 		return e.Warning
 	case EventCritical:
@@ -100,6 +108,8 @@ func (e WebhookEvents) Enabled(event string) bool {
 
 // Event names used in webhook payloads and in the notification dedupe log.
 const (
+	EventExhausted         = "exhausted"
+	EventResetSoon         = "reset_soon"
 	EventWarning           = "warning"
 	EventCritical          = "critical"
 	EventReset             = "reset"
@@ -113,17 +123,21 @@ const (
 // WebhookPayload is the JSON body POSTed to the configured endpoint.
 // It carries no credentials: no OAuth tokens, API keys, or bearer tokens.
 type WebhookPayload struct {
-	Event       string   `json:"event"`
-	Provider    string   `json:"provider"`
-	QuotaKey    string   `json:"quota_key,omitempty"`
-	AccountID   string   `json:"account_id,omitempty"`
-	Utilization *float64 `json:"utilization,omitempty"`
-	Limit       *float64 `json:"limit,omitempty"`
-	Threshold   *float64 `json:"threshold,omitempty"`
-	ResetAt     string   `json:"reset_at,omitempty"`
-	Title       string   `json:"title"`
-	Message     string   `json:"message"`
-	Timestamp   string   `json:"timestamp"`
+	ObservedAt  string                       `json:"observed_at,omitempty"`
+	Remaining   *float64                     `json:"remaining_percent,omitempty"`
+	Event       string                       `json:"event"`
+	Provider    string                       `json:"provider"`
+	QuotaKey    string                       `json:"quota_key,omitempty"`
+	AccountID   string                       `json:"account_id,omitempty"`
+	AccountName string                       `json:"account_name,omitempty"`
+	Reset       *store.CodexResetObservation `json:"reset,omitempty"`
+	Utilization *float64                     `json:"utilization,omitempty"`
+	Limit       *float64                     `json:"limit,omitempty"`
+	Threshold   *float64                     `json:"threshold,omitempty"`
+	ResetAt     string                       `json:"reset_at,omitempty"`
+	Title       string                       `json:"title"`
+	Message     string                       `json:"message"`
+	Timestamp   string                       `json:"timestamp"`
 }
 
 // WebhookSender delivers notification payloads to a user-configured HTTP endpoint.
@@ -245,6 +259,10 @@ func (s *WebhookSender) deliver(payload WebhookPayload, probe bool) error {
 	}
 
 	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("notify.Webhook: encode payload: %w", err)
+	}
+	body, err = formatWebhookBody(s.cfg.URL, payload, body)
 	if err != nil {
 		return fmt.Errorf("notify.Webhook: encode payload: %w", err)
 	}

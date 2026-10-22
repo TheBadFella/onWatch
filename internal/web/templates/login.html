@@ -6,7 +6,7 @@
                 <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93L4.93 19.07"/>
             </svg>
             <h1>onWatch</h1>
-            <p>Multi-Provider API Usage Tracker</p>
+            <p>Sign in to your usage dashboard</p>
         </div>
 
         <form class="login-form" method="post" action="{{.BasePath}}/login">
@@ -17,7 +17,7 @@
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                         <circle cx="12" cy="7" r="4"/>
                     </svg>
-                    <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter username">
+                    <input type="text" id="username" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter username">
                 </div>
             </div>
 
@@ -29,7 +29,7 @@
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
                     <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter password">
-                    <button type="button" class="toggle-password" aria-label="Toggle password visibility">
+                    <button type="button" class="toggle-password" aria-label="Show password" aria-pressed="false">
                         <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                             <circle cx="12" cy="12" r="3"/>
@@ -41,6 +41,8 @@
                     </button>
                 </div>
             </div>
+
+            <p id="login-caps-lock" class="connect-help" role="status" hidden>Caps Lock is on.</p>
 
             {{if .Error}}
             <div class="error-message" role="alert">
@@ -59,7 +61,10 @@
                 </svg>
                 Sign In
             </button>
+            <p id="login-progress" class="connect-help" role="status" aria-live="polite" hidden>Signing in...</p>
         </form>
+
+        <p class="login-account-help">Use your OnWatch username and password. Connect your AI provider accounts after signing in.</p>
 
         <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
             <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
