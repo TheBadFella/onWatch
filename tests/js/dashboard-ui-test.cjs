@@ -38,7 +38,7 @@ test('compact Codex cards expose available capacity and reset countdowns', () =>
   const card = vm.createContext({
     ...context, codexDisplayNames:{five_hour:'5-Hour'}, filterCodexQuotasForPlan:q=>q,
     formatCodexPlan:()=>'', codexAutoStartBadge:()=>'', codexUsageSourceNoteHTML:()=>'', escapeHTML:s=>String(s),
-    formatResetTime:()=> 'Oct 21, 2:30 PM',
+    formatResetTime:()=> 'Oct 21, 2:30 PM', codexResetSummaryHTML:()=>'<div class="reset-credit-summary">Banked resets</div>',
   });
   vm.runInContext(app.slice(app.indexOf('function accountOverviewQuotas('), app.indexOf('// Build one compact, clickable summary card per account')), card);
   const html = card.accountOverviewCardHTML('codex', {accountId:4, name:'Fixture account', quotas:[{
@@ -47,4 +47,21 @@ test('compact Codex cards expose available capacity and reset countdowns', () =>
   assert.match(html, /66.0% available/);
   assert.match(html, /data-reset-deadline/);
   assert.match(html, /Oct 21, 2:30 PM/);
+  assert.match(html, /reset-credit-summary/);
+});
+
+test('reset summary shows banked counts and expiry without confusing missing data with zero', () => {
+  const credits = vm.createContext({document:{addEventListener(){}},
+    escapeHTML: value=>String(value).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;'),
+    formatDateTime:()=> 'Oct 25, 3:00 PM',formatDuration:()=> '3d',
+  });
+  vm.runInContext(source, credits);
+  vm.runInContext(app.slice(app.indexOf('function codexResetCreditsCount('),app.indexOf('function renderCodexQuotaCards(')),credits);
+  const html=credits.codexResetSummaryHTML({available_count:2,status:'ok',next_expires_at:'2026-10-25T21:00:00Z'});
+  assert.match(html,/Banked resets/);assert.match(html,/2 resets/);assert.match(html,/Next expiry: Oct 25, 3:00 PM/);
+  assert.match(credits.codexResetSummaryHTML({available_count:0}),/None available/);
+  assert.match(credits.codexResetSummaryHTML(null),/Not reported/);
+  assert.doesNotMatch(credits.codexResetSummaryHTML({available_count:2,next_expires_at:'invalid'}),/Next expiry/);
+  assert.notEqual(credits.codexResetSummaryKey(null),credits.codexResetSummaryKey({available_count:0}));
+  assert.notEqual(credits.codexResetSummaryKey({available_count:2}),credits.codexResetSummaryKey({available_count:2,next_expires_at:'2026-10-25T21:00:00Z'}));
 });

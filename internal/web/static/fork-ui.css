@@ -116,3 +116,13 @@
 .app .table-footer { flex-wrap: wrap; }
 .app .table-pagination { flex-direction: row; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; padding: 2px 2px 12px; }
 .app .table-pagination .page-btn, .app .table-pagination .page-ellipsis { flex: 0 0 auto; }
+.app .card-header, .app .quota-title, .app .codex-account-header, .app .codex-account-meta { flex-wrap: wrap; gap: 8px; }
+.app .quota-title { min-width: 0; overflow-wrap: anywhere; }
+.app .quota-icon { flex-shrink: 0; }
+.app .account-overview-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.reset-credit-summary { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-inset); }
+.reset-summary-label { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+.reset-credit-summary .reset-chip-wrap { margin: 0; flex-shrink: 0; }
+.reset-credit-summary .reset-chip { font-size: 12px; overflow: visible; }
+.reset-summary-value, .reset-summary-expiry { font-size: 12px; color: var(--text-muted); }
+.reset-summary-expiry { flex-basis: 100%; overflow-wrap: anywhere; }
