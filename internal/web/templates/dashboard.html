@@ -28,14 +28,16 @@
         {{end}}
         <div class="codex-profile-dropdown" id="codex-profile-dropdown" style="display: none;">
             <button class="codex-profile-trigger" id="codex-profile-trigger" aria-haspopup="listbox" aria-expanded="false">
-                <span class="codex-profile-label" id="codex-profile-label">Profile</span>
+                <svg class="account-switcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 4v2"/></svg>
+                <span class="account-switcher-copy"><span class="account-switcher-caption">Codex accounts</span><span class="codex-profile-label" id="codex-profile-label">All accounts</span></span>
                 <svg class="codex-profile-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
             </button>
-            <ul class="codex-profile-menu" id="codex-profile-menu" role="listbox" aria-label="Select Codex profile"></ul>
+            <ul class="codex-profile-menu" id="codex-profile-menu" role="listbox" aria-label="Select Codex account"></ul>
         </div>
         <div class="codex-profile-dropdown" id="minimax-profile-dropdown" style="display: none;">
             <button class="codex-profile-trigger" id="minimax-profile-trigger" aria-haspopup="listbox" aria-expanded="false">
-                <span class="codex-profile-label" id="minimax-profile-label">Account</span>
+                <svg class="account-switcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 4v2"/></svg>
+                <span class="account-switcher-copy"><span class="account-switcher-caption">MiniMax accounts</span><span class="codex-profile-label" id="minimax-profile-label">All accounts</span></span>
                 <svg class="codex-profile-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
             </button>
             <ul class="codex-profile-menu" id="minimax-profile-menu" role="listbox" aria-label="Select MiniMax account"></ul>
@@ -114,6 +116,10 @@
         <div class="quota-grid" id="quota-grid-anthropic" data-provider="anthropic"></div>
         {{else if eq .CurrentProvider "codex"}}
         <!-- Codex quota cards for selected profile (dynamically populated by JS) -->
+        <div class="account-toolbar">
+            <div><h2>Codex accounts</h2><p>Check usage, reset times, and accounts that need attention.</p></div>
+            <button type="button" class="connect-primary" data-codex-connect>Connect account</button>
+        </div>
         <div class="quota-grid" id="quota-grid-codex" data-provider="codex"></div>
         {{else if eq .CurrentProvider "antigravity"}}
         <!-- Antigravity quota cards (dynamically populated by JS) -->

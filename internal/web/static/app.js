@@ -326,6 +326,7 @@ function populateCodexProfileTabs() {
   allItem.dataset.accountId = 'all';
   allItem.textContent = 'All accounts';
   allItem.setAttribute('role', 'option');
+  allItem.tabIndex = -1;
   allItem.setAttribute('aria-selected', State.codexAccount === 'all' ? 'true' : 'false');
   allItem.addEventListener('click', () => {
     switchCodexProfile('all');
@@ -339,6 +340,7 @@ function populateCodexProfileTabs() {
     li.dataset.accountId = profile.id;
     li.textContent = profile.name;
     li.setAttribute('role', 'option');
+    li.tabIndex = -1;
     li.setAttribute('aria-selected', profile.id === State.codexAccount ? 'true' : 'false');
     li.addEventListener('click', () => {
       switchCodexProfile(profile.id);
@@ -362,6 +364,7 @@ function switchCodexProfile(accountId) {
   State.codexAccount = accountId;
   saveCodexAccount(accountId);
   updateProfileTabsActive();
+  updateCodexProfileTabsVisibility();
   refreshAll();
 }
 
@@ -377,6 +380,12 @@ function updateProfileTabsActive() {
       const activeProfile = State.codexProfiles.find(p => p.id === State.codexAccount);
       if (activeProfile) label.textContent = activeProfile.name;
     }
+  }
+
+  const trigger = document.getElementById('codex-profile-trigger');
+  if (trigger && label) {
+    trigger.title = 'Codex: ' + label.textContent + ' (' + State.codexProfiles.length + ' accounts)';
+    trigger.setAttribute('aria-label', 'Switch ' + trigger.title);
   }
 
   menu.querySelectorAll('.codex-profile-item').forEach(item => {
@@ -401,7 +410,7 @@ function updateCodexProfileTabsVisibility() {
   if (!dropdown) return;
 
   const provider = getCurrentProvider();
-  const show = provider === 'codex' && State.codexProfiles.length > 1;
+  const show = provider === 'codex' && State.codexProfiles.length > 1 && State.codexAccount !== 'all';
   dropdown.style.display = show ? '' : 'none';
 }
 
@@ -524,6 +533,7 @@ function populateMiniMaxAccountTabs() {
   allItem.dataset.accountId = 'all';
   allItem.textContent = 'All accounts';
   allItem.setAttribute('role', 'option');
+  allItem.tabIndex = -1;
   allItem.setAttribute('aria-selected', State.minimaxAccount === 'all' ? 'true' : 'false');
   allItem.addEventListener('click', () => {
     switchMiniMaxAccount('all');
@@ -537,6 +547,7 @@ function populateMiniMaxAccountTabs() {
     li.dataset.accountId = account.id;
     li.textContent = account.name;
     li.setAttribute('role', 'option');
+    li.tabIndex = -1;
     li.setAttribute('aria-selected', account.id === State.minimaxAccount ? 'true' : 'false');
     li.addEventListener('click', () => {
       switchMiniMaxAccount(account.id);
@@ -559,6 +570,7 @@ function switchMiniMaxAccount(accountId) {
   State.minimaxAccount = accountId;
   saveMiniMaxAccount(accountId);
   updateMiniMaxAccountTabsActive();
+  updateMiniMaxAccountTabsVisibility();
   refreshAll();
 }
 
@@ -597,7 +609,7 @@ function updateMiniMaxAccountTabsVisibility() {
   if (!dropdown) return;
 
   const provider = getCurrentProvider();
-  const show = provider === 'minimax' && State.minimaxAccounts && State.minimaxAccounts.length > 1;
+  const show = provider === 'minimax' && State.minimaxAccounts && State.minimaxAccounts.length > 1 && State.minimaxAccount !== 'all';
   dropdown.style.display = show ? '' : 'none';
 }
 
@@ -5085,15 +5097,17 @@ function accountOverviewCardHTML(provider, account, idx) {
         </div>`;
       }).join('');
 
-  return `<article class="account-overview-card" data-account-id="${accountId}" data-provider="${provider}" role="button" tabindex="0" aria-label="Open ${escapeHTML(accountName)} details">
+  return `<article class="account-overview-card" data-account-id="${accountId}" data-provider="${provider}" aria-label="${escapeHTML(accountName)} account">
     <header class="account-overview-header">
       <span class="account-overview-name">${escapeHTML(accountName)}</span>
       ${badge ? `<span class="account-overview-badge">${escapeHTML(badge)}</span>` : ''}
     </header>
+    ${accountConnectionHTML(account)}
     ${provider === 'codex' ? codexResetSummaryHTML(account.resetCredits) : ''}
     ${provider === 'codex' ? codexUsageSourceNoteHTML(account.usageSourceNote) : ''}
     <div class="account-overview-quotas">${quotaHTML}</div>
-    <span class="account-overview-cta">View details &rarr;</span>
+    <div class="account-overview-actions"><button type="button" class="account-overview-cta" aria-label="Open ${escapeHTML(accountName)} details">View details &rarr;</button>
+    ${provider === 'codex' && (account.paused || account.authRequired) ? `<button type="button" class="connect-primary" data-codex-connect data-profile-name="${escapeHTML(accountName)}">Reconnect</button>` : ''}</div>
   </article>`;
 }
 
@@ -5124,9 +5138,8 @@ function renderAccountsOverview(provider, accounts) {
   };
   container.querySelectorAll('.account-overview-card').forEach(card => {
     const accountId = parseInt(card.dataset.accountId, 10);
-    card.addEventListener('click', () => drill(accountId));
-    card.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drill(accountId); }
+    card.addEventListener('click', event => {
+      if (!event.target.closest('[data-codex-connect]')) drill(accountId);
     });
   });
 }
@@ -8020,9 +8033,8 @@ function renderAllProvidersView() {
       saveDefaultProvider(provider);
       window.location.href = `${BASE_PATH}/?provider=${provider}`;
     };
-    card.addEventListener('click', go);
-    card.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    card.addEventListener('click', event => {
+      if (!event.target.closest('[data-codex-connect]')) go();
     });
   });
 
@@ -9798,6 +9810,8 @@ function setupPasswordToggle() {
       const isVisible = input.type === 'text';
       input.type = isVisible ? 'password' : 'text';
       toggle.classList.toggle('showing', !isVisible);
+      toggle.setAttribute('aria-label', isVisible ? 'Show password' : 'Hide password');
+      toggle.setAttribute('aria-pressed', String(!isVisible));
     });
   }
 }
@@ -10267,6 +10281,9 @@ function setupProviderSelector() {
     tab.addEventListener('click', () => {
       const provider = tab.dataset.provider;
       saveDefaultProvider(provider);
+      // Provider navigation always starts at its account overview.
+      if (provider === 'codex') saveCodexAccount('all');
+      if (provider === 'minimax') saveMiniMaxAccount('all');
       window.location.href = `${BASE_PATH}/?provider=${provider}`;
     });
   });
@@ -10487,6 +10504,8 @@ function isSettingsPage() {
 }
 
 async function initSettingsPage() {
+  const save = document.getElementById('settings-save-btn');
+  if (save) save.disabled = true;
   setupSettingsTabs();
   // The password form does not depend on loaded settings. Wire it before the
   // awaits below, or a click during a slow load silently does nothing.
@@ -10582,9 +10601,10 @@ async function setupMenubarSettings() {
 }
 
 async function loadSettings() {
+  State.settingsLoaded = false;
   try {
     const resp = await authFetch('/api/settings');
-    if (!resp.ok) return;
+    if (!resp.ok) throw new Error('Could not load settings');
     const data = await resp.json();
 
     // Timezone
@@ -10691,8 +10711,9 @@ async function loadSettings() {
     await populateProviderToggles(data.provider_visibility || {});
     await populateDashboardTabOrder();
     await populateMenubarSettings(data.menubar || {});
+    State.settingsLoaded = true;
   } catch (e) {
-    // Settings load failed silently
+    showSettingsFeedback(document.getElementById('settings-feedback'), 'Settings could not be loaded. Reload this page before saving; your saved settings have not been changed.', 'error');
   }
 }
 
@@ -12027,6 +12048,7 @@ async function openProviderSettingsModal(providerKey) {
 
     // Build the full body with profiles section first, then settings fields
     bodyEl.innerHTML = profilesHTML + buildFieldsHTML();
+    window.installCodexAuthActions?.();
 
     // Fetch and render profiles
     const profilesList = document.getElementById('codex-profiles-list');
@@ -12036,7 +12058,7 @@ async function openProviderSettingsModal(providerKey) {
         const data = await res.json();
         const profiles = Array.isArray(data.profiles) ? data.profiles : [];
         if (profiles.length === 0) {
-          profilesList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;margin:0">No profiles saved. Save your first profile using the CLI: <code>onwatch codex profile save &lt;name&gt;</code></p>';
+          profilesList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;margin:0">No accounts connected yet. Select Connect Codex account to sign in with your browser.</p>';
         } else {
           let html = '';
           profiles.forEach(profile => {
@@ -12048,6 +12070,7 @@ async function openProviderSettingsModal(providerKey) {
             html += `</div>`;
             html += `<div style="display:flex;gap:8px">`;
             if (!isDeleted) {
+              html += `<button type="button" class="connect-primary" data-codex-connect data-profile-name="${escapeHtml(profile.name)}">Reconnect</button>`;
               html += `<button class="codex-profile-action-btn" data-action="refresh" data-name="${escapeHtml(profile.name)}" title="Refresh from current auth.json" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer">Refresh</button>`;
             }
             html += `<button class="codex-profile-action-btn" data-action="delete" data-name="${escapeHtml(profile.name)}" title="Delete profile" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:${isDeleted ? 'var(--text-disabled)' : 'var(--md-error,#b3261e)'}">Delete</button>`;
@@ -12439,6 +12462,7 @@ function setupProviderReload() {
 }
 
 function gatherSettings() {
+  if (State.settingsLoaded !== true) throw new Error('Reload this page to load your saved settings before saving.');
   const settings = {};
 
   // SMTP
@@ -12575,6 +12599,7 @@ function setupSettingsSave() {
   const saveBtn = document.getElementById('settings-save-btn');
   const feedback = document.getElementById('settings-feedback');
   if (!saveBtn) return;
+  saveBtn.disabled = State.settingsLoaded !== true;
 
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
@@ -13459,6 +13484,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Settings page has its own initialization
+  if (document.querySelector('.login-form')) {
+    initTheme();
+    setupPasswordToggle();
+    return;
+  }
+
   if (isSettingsPage()) {
     initTheme();
     initLayoutToggle();

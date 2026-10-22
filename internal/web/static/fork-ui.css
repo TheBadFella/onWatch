@@ -62,8 +62,41 @@
 .app-sidebar .theme-toggle:hover,
 .app-sidebar .notification-bell:hover { background: var(--surface-card-alt); color: var(--text-primary); }
 .sidebar-action-label { font: 500 13px var(--font-primary); white-space: nowrap; }
-.app-sidebar .codex-profile-trigger { max-width: 100%; }
+/* One icon column for provider links, account tools and footer actions. */
+.app-sidebar .provider-tab,
+.app-sidebar .header-btn,
+.app-sidebar .theme-toggle,
+.app-sidebar .notification-bell { box-sizing: border-box; min-height: 42px; border: 1px solid transparent; }
+.app-sidebar .provider-tab-icon,
+.app-sidebar .header-btn svg,
+.app-sidebar .theme-toggle svg,
+.app-sidebar .notification-bell svg { flex-shrink: 0; width: 18px; height: 18px; }
+.app-sidebar .header-actions { flex-direction: column; align-items: stretch; }
+.app-sidebar .header-meta { padding-left: 12px; }
+.app-sidebar .codex-profile-trigger {
+  width: 100%; max-width: 100%; min-height: 60px; gap: 12px; padding: 10px 12px;
+  text-align: left; border-radius: var(--radius-md); font-size: 14px;
+}
+.account-switcher-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.account-switcher-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+.account-switcher-caption { font-size: 11px; color: var(--text-muted); }
+.app-sidebar .codex-profile-menu { min-width: 210px; max-width: calc(100vw - 88px); max-height: min(360px, 70dvh); }
+.app-sidebar .codex-profile-menu .codex-profile-item {
+  min-height: 44px; padding: 12px; font-size: 14px; white-space: normal; overflow-wrap: anywhere;
+}
+.app-sidebar .codex-profile-menu .codex-profile-item:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.sidebar-collapsed .account-switcher-copy,
+.sidebar-collapsed .codex-profile-chevron { display: none; }
+.sidebar-collapsed .app-sidebar .codex-profile-trigger { min-height: 44px; }
+.notification-delivery-status { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.notification-delivery-status[data-attention="true"] { color: var(--accent-peach); }
+@media (max-height: 760px) {
+  .app-sidebar, .sidebar-collapsed .app-sidebar { gap: 8px; }
+  .app-sidebar .header-meta { display: none; }
+}
 .app-sidebar .codex-profile-menu { left: calc(100% + 8px); top: auto; bottom: 0; right: auto; }
+.app-sidebar .notification-center { margin-right: 0; }
+.app-sidebar .codex-profile-dropdown { margin: 0; min-width: 0; }
 .app-sidebar .notification-dropdown { left: calc(100% + 16px); right: auto; top: auto; bottom: 0; width: min(360px, calc(100vw - 96px)); }
 .sidebar-backdrop { display: none; }
 .sidebar-collapsed .app { padding-left: 72px; }
@@ -126,3 +159,37 @@
 .reset-credit-summary .reset-chip { font-size: 12px; overflow: visible; }
 .reset-summary-value, .reset-summary-expiry { font-size: 12px; color: var(--text-muted); }
 .reset-summary-expiry { flex-basis: 100%; overflow-wrap: anywhere; }
+.account-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+.account-toolbar h2 { font-size: 16px; margin: 0 0 6px; }
+.account-toolbar p, .connect-help, .login-account-help { color: var(--text-muted); font-size: 13px; line-height: 1.6; margin: 0; }
+.connect-help { margin: 8px 0 16px; }
+.login-account-help { margin-top: 20px; text-align: center; }
+.login-form .input-wrapper { gap: 8px; }
+.login-form .input-wrapper input { min-width: 0; }
+.login-form .toggle-password { position: static; flex: 0 0 40px; min-height: 40px; padding: 10px; border: 1px solid var(--border-default); border-radius: var(--radius-md); }
+.connect-primary { background: var(--accent-teal); color: var(--text-inverse); border: 1px solid var(--accent-teal); border-radius: var(--radius-md); padding: 10px 14px; font: 500 13px var(--font-primary); min-height: 40px; cursor: pointer; }
+.connect-primary:disabled, .codex-connect-card button:disabled, .login-button:disabled { opacity: .6; cursor: wait; }
+.account-connection-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 11px; color: var(--text-muted); }
+.account-connection-state { color: var(--accent-teal-text); }
+.account-connection-state[data-attention="true"] { color: var(--accent-peach-text); }
+.account-overview-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.account-overview-cta { border: 0; background: none; padding: 8px 0; cursor: pointer; text-align: left; font-family: inherit; }
+#codex-auth-modal-overlay { overflow-y: auto; overscroll-behavior: contain; }
+.codex-connect-card { max-height: calc(100dvh - 32px); overflow-y: auto !important; overscroll-behavior: contain; }
+.connect-steps { display: flex; flex-wrap: wrap; gap: 6px 24px; padding-left: 18px; margin: 0 0 20px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.codex-connect-card button, .codex-connect-card input { min-height: 40px; }
+.codex-connect-card button, .codex-connect-card a { touch-action: manipulation; }
+.codex-connect-card .btn-primary { background: var(--accent-teal); color: var(--text-inverse); border: 1px solid var(--accent-teal); }
+.codex-connect-card input[type="file"] { width: 100%; font-size: 13px !important; margin-bottom: 12px; }
+.codex-profile-item, .codex-profile-item > div:last-child { flex-wrap: wrap; gap: 8px; }
+.codex-connect-card button:focus-visible, .account-toolbar button:focus-visible, .account-overview-actions button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+#codex-device-code-display { user-select: all; overflow-wrap: anywhere; }
+#codex-auth-status { overflow-wrap: anywhere; line-height: 1.6; }
+#codex-auth-done { margin-top: 16px; width: 100%; }
+@media (max-width: 480px) {
+  .account-toolbar .connect-primary { width: 100%; }
+  .codex-connect-card input, .login-form input { font-size: 16px !important; }
+  .codex-connect-card > div { padding: 16px !important; }
+  .connect-steps { display: block; }
+  #codex-device-code-display { font-size: 20px !important; letter-spacing: 1px !important; padding: 8px !important; }
+}

@@ -49,7 +49,7 @@ test-screenshots/
 test-evidence/
 
 # Go
-vendor/
+/vendor/
 *.test
 coverage.out
 coverage.html
