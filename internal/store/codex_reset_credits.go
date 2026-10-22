@@ -63,7 +63,11 @@ func (s *Store) SyncCodexResetCredits(accountID int64, credits []CodexResetCredi
 				 unsupported_by_plan, expiry_unknown, first_seen, last_seen, gone_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 			ON CONFLICT(account_id, credit_id) DO UPDATE SET
-				status = excluded.status,
+				redeemed_at = CASE
+                    WHEN excluded.status = 'redeemed' AND codex_reset_credits.status IN ('available','redeeming')
+                    THEN COALESCE(codex_reset_credits.redeemed_at, excluded.last_seen)
+                    ELSE codex_reset_credits.redeemed_at END,
+                status = excluded.status,
 				reset_type = excluded.reset_type,
 				title = excluded.title,
 				description = excluded.description,
@@ -98,8 +102,8 @@ func (s *Store) SyncCodexResetCredits(accountID int64, credits []CodexResetCredi
 			expiresAt,
 			c.UnsupportedByPlan,
 			c.ExpiryUnknown,
-			seenAt.Format(time.RFC3339),
-			seenAt.Format(time.RFC3339),
+			seenAt.Format(time.RFC3339Nano),
+			seenAt.Format(time.RFC3339Nano),
 		); err != nil {
 			return fmt.Errorf("codex reset credits: upsert %q: %w", c.CreditID, err)
 		}
@@ -134,7 +138,7 @@ func (s *Store) SyncCodexResetCredits(accountID int64, credits []CodexResetCredi
 	for _, id := range missing {
 		if _, err := tx.Exec(
 			`UPDATE codex_reset_credits SET gone_at = ? WHERE account_id = ? AND credit_id = ?`,
-			seenAt.Format(time.RFC3339), accountID, id,
+			seenAt.Format(time.RFC3339Nano), accountID, id,
 		); err != nil {
 			return fmt.Errorf("codex reset credits: mark gone %q: %w", id, err)
 		}

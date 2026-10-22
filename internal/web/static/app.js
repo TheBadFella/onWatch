@@ -4802,6 +4802,7 @@ async function fetchCurrent(onlyIfChanged = false) {
           }
         }
       } else if (provider === 'codex') {
+        renderCodexResetHistory([{...data, accountId: requestAccount, accountName: State.codexProfiles.find(p => p.id === requestAccount)?.name || data.accountName || 'Codex account'}]);
         fetchCodexUsage({ mode: 'codex', data });
       } else if (provider === 'antigravity') {
         // Antigravity response: { capturedAt: ..., quotas: [...], source: 'cli'|'ide' }
@@ -5163,6 +5164,7 @@ async function fetchAccountsOverview(provider, requestSeq, onlyIfChanged = false
       if (!shouldRenderLiveData(`${provider}:accounts`, accounts, !onlyIfChanged)) return;
       State.accountsOverview = { provider, accounts };
       renderAccountsOverview(provider, accounts);
+      if (provider === 'codex') renderCodexResetHistory(accounts);
       setLastUpdated();
       const statusDot = document.getElementById('status-dot');
       if (statusDot) statusDot.classList.remove('stale');

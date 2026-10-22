@@ -219,3 +219,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     center.appendChild(link);
   } catch (e) { /* The existing connection status covers failed dashboard requests. */ }
 });
+
+function codexResetCauseLabel(cause) {
+  return {scheduled:'Scheduled reset',banked_credit:'Banked reset used',early_unknown:'Early reset, cause unconfirmed'}[cause] || 'Reset detected, cause unknown';
+}
+
+function codexResetHistoryHTML(accounts) {
+  const groups = new Map();
+  accounts.forEach(account => (account.recentResets || []).forEach(reset => {
+    if (!Number.isFinite(Date.parse(reset.observedAt))) return;
+    const key = String(account.accountId || reset.accountId) + '|' + reset.observedAt;
+    if (!groups.has(key)) groups.set(key,{key,name:account.accountName || account.name || 'Codex account',at:reset.observedAt,resets:[]});
+    groups.get(key).resets.push(reset);
+  }));
+  const list = [...groups.values()].sort((a,b) => Date.parse(b.at)-Date.parse(a.at)).slice(0,8);
+  if (!list.length) return '';
+  const time = value => Number.isFinite(Date.parse(value)) ? escapeHTML(formatDateTime(value)) : 'Not reported';
+  const percent = value => Number.isFinite(value) ? value.toFixed(1)+'%' : 'Not recorded';
+  return '<h2>Recent resets</h2><p>Reset causes are classified from usage timing and observed credit redemptions. A provider-issued reset cannot be confirmed from timing alone.</p>' + list.map(group => {
+    const order = {five_hour:0,seven_day:1,code_review:2};
+    group.resets.sort((a,b) => (order[a.quotaName] ?? 3) - (order[b.quotaName] ?? 3));
+    const causes = [...new Set(group.resets.map(reset => codexResetCauseLabel(reset.cause)))].join(' / ');
+    const limits = group.resets.map(reset => ({five_hour:'5-hour limit',seven_day:'Weekly limit',code_review:'Code review limit'}[reset.quotaName] || reset.quotaName.replaceAll('_',' '))).join(' + ');
+    return `<details class="reset-history-entry" data-reset-group="${escapeHTML(group.key)}"><summary><span><strong>${escapeHTML(group.name)}</strong><span class="reset-history-cause">${escapeHTML(causes)}</span><span>${escapeHTML(limits)}</span></span><time>${time(group.at)}</time></summary><div class="reset-history-details">` + group.resets.map(reset => {
+      const label = {five_hour:'5-hour limit',seven_day:'Weekly limit',code_review:'Code review limit'}[reset.quotaName] || reset.quotaName.replaceAll('_',' ');
+      return `<div><h3>${escapeHTML(label)}</h3><dl><dt>Usage before / after</dt><dd>${percent(reset.beforePercent)} → ${percent(reset.afterPercent)} used</dd><dt>Previously due</dt><dd>${time(reset.previousResetAt)}</dd><dt>Next due</dt><dd>${time(reset.nextResetAt)}</dd></dl><p>${escapeHTML(reset.evidence || 'The cause was not recorded.')}</p></div>`;
+    }).join('') + '</div></details>';
+  }).join('');
+}
+
+function renderCodexResetHistory(accounts) {
+  const section = document.getElementById('codex-reset-history');
+  if (!section) return;
+  const html = codexResetHistoryHTML(accounts);
+  if (section._resetHTML === html) return;
+  const open = new Set([...section.querySelectorAll('details[open]')].map(el => el.dataset.resetGroup));
+  section.innerHTML = html; section.hidden = !html; section._resetHTML = html;
+  section.querySelectorAll('details').forEach(el => { el.open = open.has(el.dataset.resetGroup); });
+}

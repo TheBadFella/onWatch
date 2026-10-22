@@ -434,3 +434,57 @@ func TestCodexTracker_AccountResetRearmsWebhook(t *testing.T) {
 		t.Fatalf("after account 6 reset deliveries = %d, want 3", got)
 	}
 }
+
+func TestCodexResetNotificationEvidence(t *testing.T) {
+	t.Parallel()
+	s := newTestCodexStore(t)
+	account, err := s.GetOrCreateProviderAccountByExternalID("codex", "Personal", "fixture-personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := make(chan notify.WebhookPayload, 3)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload notify.WebhookPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		messages <- payload
+		w.WriteHeader(204)
+	}))
+	defer receiver.Close()
+	raw, _ := json.Marshal(notify.WebhookConfig{URL: receiver.URL, Events: notify.WebhookEvents{Reset: true}})
+	s.SetSetting("webhook", string(raw))
+	s.SetSetting("notifications", `{"notify_reset":true,"channels":{"webhook":true}}`)
+	engine := notify.New(s, slog.Default())
+	if err := engine.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.ConfigureWebhook(); err != nil {
+		t.Fatal(err)
+	}
+	tr := NewCodexTracker(s, slog.Default())
+	tr.SetOnAccountReset(engine.CheckCodexReset)
+	now := time.Now().UTC()
+	old := now.Add(3 * time.Hour)
+	next := now.Add(5 * time.Hour)
+	poll := func(at time.Time, used float64, due time.Time) {
+		t.Helper()
+		snap := &api.CodexSnapshot{AccountID: account.ID, CapturedAt: at, Quotas: []api.CodexQuota{{Name: "five_hour", Utilization: used, ResetsAt: &due}}}
+		if _, err := s.InsertCodexSnapshot(snap); err != nil {
+			t.Fatal(err)
+		}
+		if err := tr.Process(snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+	poll(now.Add(-time.Minute), 98, old)
+	poll(now, 0, next)
+	poll(now.Add(time.Minute), 0, next)
+	if len(messages) != 1 {
+		t.Fatalf("delivery count=%d, want 1", len(messages))
+	}
+	payload := <-messages
+	if payload.AccountName != "Personal" || payload.Reset == nil || payload.Reset.Cause != "early_unknown" || payload.Reset.BeforePercent == nil || *payload.Reset.BeforePercent != 98 || payload.Reset.AfterPercent == nil || *payload.Reset.AfterPercent != 0 {
+		t.Fatalf("incorrect delivered evidence: %+v", payload)
+	}
+}
