@@ -31,6 +31,9 @@ expiry when available. **None available** means the provider reported zero;
 wrap so badges and reset information remain visible on narrow screens. This
 display does not redeem reset credits.
 
+History tables show their consumption-rate explanation below the title.
+The footer contains the row count and page controls.
+
 ## Sign-in and account connections
 
 Settings opens on **General**, followed by **Providers** and **Notifications**.

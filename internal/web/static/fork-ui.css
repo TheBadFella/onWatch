@@ -257,3 +257,6 @@
 .cost-model-rates > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
 .cost-model-rates[open] > summary { margin-bottom: 12px; }
 #cost-detected-plans small { display: block; color: var(--text-muted); }
+
+.table-heading { min-width: 0; }
+.table-subnote { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }

@@ -636,13 +636,16 @@
         {{if and (ne .CurrentProvider "both") (ne .CurrentProvider "api-integrations")}}
         <section class="cycles-section" id="cycles-section">
             <header class="section-header">
-                <h3 class="section-title">
-                    <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                        <path d="M3 3v5h5"/>
-                    </svg>
-                    {{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Usage Samples{{else}}Logging History{{end}}
-                </h3>
+                <div class="table-heading">
+                    <h3 class="section-title">
+                        <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                            <path d="M3 3v5h5"/>
+                        </svg>
+                        {{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Usage Samples{{else}}Logging History{{end}}
+                    </h3>
+                    <p class="table-subnote">{{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Δ = change since previous sample{{else}}⚡ = consumption rate per hour{{end}}</p>
+                </div>
                 <div class="cycles-filters-inline">
                     <div class="filter-group">
                         <span class="filter-label">Range</span>
@@ -688,19 +691,21 @@
             </div>
             <div class="table-footer">
                 <span class="table-info" id="cycles-info">Showing 0-0 of 0</span>
-                <span class="table-legend">{{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Δ = change since previous sample{{else}}⚡ = consumption rate per hour{{end}}</span>
                 <div class="table-pagination" id="cycles-pagination"></div>
             </div>
         </section>
 
         <section class="cycle-overview-section">
             <header class="section-header">
-                <h3 class="section-title">
-                    <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 20V10M18 20V4M6 20v-4"/>
-                    </svg>
-                    {{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Billing Cycle Overview{{else}}Cycle Overview{{end}}
-                </h3>
+                <div class="table-heading">
+                    <h3 class="section-title">
+                        <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20V10M18 20V4M6 20v-4"/>
+                        </svg>
+                        {{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Billing Cycle Overview{{else}}Cycle Overview{{end}}
+                    </h3>
+                    <p class="table-subnote">{{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Monthly cycle comparison by quota{{else}}⚡ = consumption rate per hour{{end}}</p>
+                </div>
                 <div class="cycles-filters-inline">
                     <div class="filter-group">
                         <span class="filter-label">{{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Quota{{else}}Period{{end}}</span>
@@ -724,7 +729,6 @@
             </div>
             <div class="table-footer">
                 <span class="table-info" id="overview-info">Showing 0-0 of 0</span>
-                <span class="table-legend">{{if or (eq .CurrentProvider "cursor") (eq .CurrentProvider "opencode") (eq .CurrentProvider "mistral") (eq .CurrentProvider "ollama") (eq .CurrentProvider "muse") (eq .CurrentProvider "commandcode")}}Monthly cycle comparison by quota{{else}}⚡ = consumption rate per hour{{end}}</span>
                 <div class="table-pagination" id="overview-pagination"></div>
             </div>
         </section>
