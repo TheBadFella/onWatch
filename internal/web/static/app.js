@@ -406,6 +406,15 @@ function closeCodexProfileDropdown() {
 
 // Show/hide profile dropdown based on current provider and profile count
 function updateCodexProfileTabsVisibility() {
+  const selected = State.codexAccount !== 'all';
+  const profile = State.codexProfiles.find(p => p.id === State.codexAccount);
+  const heading = document.getElementById('codex-selected-account-name');
+  if (heading) heading.textContent = selected ? (profile?.name || 'Codex account') : 'Codex accounts';
+  const identifier = document.getElementById('codex-selected-account-id');
+  if (identifier) {
+    identifier.textContent = selected ? `Profile ID: ${State.codexAccount}` : '';
+    identifier.hidden = !selected;
+  }
   const dropdown = document.getElementById('codex-profile-dropdown');
   if (!dropdown) return;
 

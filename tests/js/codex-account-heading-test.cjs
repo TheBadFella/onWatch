@@ -1,0 +1,46 @@
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const root = path.join(__dirname, '../..');
+const app = fs.readFileSync(path.join(root, 'internal/web/static/app.js'), 'utf8');
+const fork = fs.readFileSync(path.join(root, 'internal/web/static/fork-ui.js'), 'utf8');
+
+test('Codex Details identifies the selected account and follows account switches', () => {
+  const heading = {textContent:'Codex accounts'};
+  const identifier = {textContent:'',hidden:true};
+  const dropdown = {style:{}};
+  const nodes = {'codex-selected-account-name':heading,'codex-selected-account-id':identifier,'codex-profile-dropdown':dropdown};
+  const State = {codexAccount:'all',codexProfiles:[{id:6,name:'badfella22'},{id:9,name:'Other account'}]};
+  let refreshed = 0;
+  const c = vm.createContext({State,document:{getElementById:id=>nodes[id]||null,addEventListener(){}},
+    getCurrentProvider:()=> 'codex',saveCodexAccount(){},updateProfileTabsActive(){},refreshAll(){refreshed++;}});
+  vm.runInContext(fork,c);
+  vm.runInContext(app.slice(app.indexOf('function switchCodexProfile('),app.indexOf('function updateProfileTabsActive(')),c);
+  const start=app.indexOf('function updateCodexProfileTabsVisibility(');
+  vm.runInContext(app.slice(start,app.indexOf('// Refresh all dashboard data',start)),c);
+  c.updateCodexProfileTabsVisibility();
+  assert.equal(heading.textContent,'Codex accounts');
+  assert.equal(identifier.hidden,true);
+  c.switchCodexProfile(6);
+  assert.equal(heading.textContent,'badfella22');
+  assert.equal(identifier.textContent,'Profile ID: 6');
+  assert.equal(identifier.hidden,false);
+  c.switchCodexProfile(9);
+  assert.equal(heading.textContent,'Other account');
+  assert.equal(identifier.textContent,'Profile ID: 9');
+  c.switchCodexProfile('all');
+  assert.equal(heading.textContent,'Codex accounts');
+  assert.equal(identifier.hidden,true);
+  assert.equal(identifier.textContent,'');
+  assert.equal(refreshed,3);
+  State.codexProfiles=[{id:6,name:'<badfella22>'}];
+  c.switchCodexProfile(6);
+  assert.equal(heading.textContent,'<badfella22>');
+  assert.equal(dropdown.style.display,'none');
+  State.codexProfiles=[];
+  c.updateCodexProfileTabsVisibility();
+  assert.equal(heading.textContent,'Codex account');
+  assert.equal(identifier.textContent,'Profile ID: 6');
+});

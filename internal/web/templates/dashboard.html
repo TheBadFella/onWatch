@@ -118,7 +118,7 @@
         {{else if eq .CurrentProvider "codex"}}
         <!-- Codex quota cards for selected profile (dynamically populated by JS) -->
         <div class="account-toolbar">
-            <div><h2>Codex accounts</h2><p>Check usage, reset times, and accounts that need attention.</p></div>
+            <div><h2 id="codex-selected-account-name" aria-live="polite">Codex accounts</h2><p id="codex-selected-account-id" hidden></p><p>Check usage, reset times, and accounts that need attention.</p></div>
             <button type="button" class="connect-primary" data-codex-connect>Connect account</button>
         </div>
         <div class="quota-grid" id="quota-grid-codex" data-provider="codex"></div>
