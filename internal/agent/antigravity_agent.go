@@ -225,13 +225,10 @@ func (a *AntigravityAgent) poll(ctx context.Context) {
 	}
 }
 
-// fetchSnapshot obtains a snapshot from the preferred source. Docker/manual
-// config always uses the direct IDE client. For "both", the CLI is preferred
-// for its richer weekly+5h data and falls back to the IDE probe.
+// fetchSnapshot honors the selected source. A manual URL configures only the
+// IDE client; it must not override a CLI selection. "Both" falls back to that
+// IDE client when the managed CLI is unavailable.
 func (a *AntigravityAgent) fetchSnapshot(ctx context.Context, source string) (*api.AntigravitySnapshot, error) {
-	if a.manualBaseURL != "" {
-		return a.fetchIDE(ctx)
-	}
 	switch source {
 	case api.AntigravitySourceCLI:
 		return a.fetchCLI(ctx)

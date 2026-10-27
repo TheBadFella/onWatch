@@ -5144,7 +5144,7 @@ function renderAccountsOverview(provider, accounts) {
   container.querySelectorAll('.account-overview-card').forEach(card => {
     const accountId = parseInt(card.dataset.accountId, 10);
     card.addEventListener('click', event => {
-      if (!event.target.closest('[data-codex-connect]')) drill(accountId);
+      if (!event.target.closest('[data-codex-connect], .reset-credit-details')) drill(accountId);
     });
   });
 }

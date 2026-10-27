@@ -31,6 +31,12 @@ expiry when available. **None available** means the provider reported zero;
 wrap so badges and reset information remain visible on narrow screens. This
 display does not redeem reset credits.
 
+Click the reset count or **View details** to expand the individual banked
+resets, including their reported titles, expiry dates, and plan restrictions.
+Missing expiry dates and unavailable details are labeled explicitly. If a detail
+check fails, retained records are marked as last known details. The count can
+remain available even when the provider's detail endpoint is unavailable.
+
 History tables show their consumption-rate explanation below the title.
 The footer contains the row count and page controls.
 

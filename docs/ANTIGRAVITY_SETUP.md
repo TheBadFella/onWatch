@@ -124,6 +124,55 @@ You'll see quota cards for each model, including:
 
 ## Docker/Container Configuration
 
+### Keep monitoring while the IDE is closed
+
+Use the `cli` source with an authenticated `agy` installed in the same container
+as onWatch. A forwarded IDE port is tied to the desktop process and its CSRF
+token. Both can change when the IDE restarts, and polling stops when it closes.
+
+The fork offers an optional Linux AMD64 image target with `agy` 1.4.7, verified
+against the official release's SHA-512 checksum. After building the Linux
+onWatch binary as `dist/onwatch-linux-amd64`, build it with:
+
+```bash
+docker build -f .github/Dockerfile.fork --target runtime-antigravity -t onwatch-antigravity:local .
+```
+
+Disable Antigravity polling in Settings before switching images, so its managed
+CLI cannot compete with the one-time sign-in process. Use this image in the
+existing onWatch service. Keep the `/data` mount. The
+CLI's home is `/data/antigravity`, separate from the dashboard database. No IDE
+port or CSRF token is needed. Remove `ANTIGRAVITY_BASE_URL` and
+`ANTIGRAVITY_CSRF_TOKEN` from the service and select **CLI** in
+**Settings -> Providers -> Antigravity**; an existing saved source preference
+takes precedence over the environment default. An explicit CLI selection now
+ignores a leftover IDE bridge URL. **Both** tries the CLI first and uses that
+URL only as an IDE fallback.
+
+[The example override](examples/compose.antigravity.yml) changes only the image
+and these environment settings. Apply it after your existing Compose file.
+
+Sign in interactively as the same container user:
+
+```bash
+docker compose exec -e SSH_CONNECTION=onwatch-container onwatch /usr/local/bin/agy
+```
+
+Follow Google's [remote SSH sign-in flow](https://www.antigravity.google/docs/install?tab=cli).
+Complete Google sign-in yourself and exit the CLI without sending a prompt.
+Do not copy a Windows credential store into Linux. An API key uses a different
+billing path and does not establish the subscription account session needed here.
+
+Enable polling and verify a fresh **Source: agy CLI** snapshot, then recreate the container and
+verify another fresh snapshot. Authentication persistence in a headless
+container depends on the CLI's credential storage and must be checked on the
+deployment. If sign-in does not survive recreation, keep the previous image
+and resolve credential storage before switching production polling. This
+optional image is built locally; the normal published Alpine image does not
+include `agy`.
+
+### Connect to a running IDE manually
+
 In containerized environments where process scanning doesn't work, you can manually configure the connection:
 
 ### Environment Variables

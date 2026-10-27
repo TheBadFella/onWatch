@@ -1,0 +1,12 @@
+# Apply after the existing Compose file. Build this image on the Docker host.
+services:
+  onwatch:
+    image: onwatch-antigravity:local
+    environment:
+      ANTIGRAVITY_ENABLED: "true"
+      ANTIGRAVITY_SOURCE: cli
+      ANTIGRAVITY_CLI_PATH: /usr/local/bin/agy
+      HOME: /data/antigravity
+      # Clear the old IDE bridge configuration inherited from the base file.
+      ANTIGRAVITY_BASE_URL: ""
+      ANTIGRAVITY_CSRF_TOKEN: ""

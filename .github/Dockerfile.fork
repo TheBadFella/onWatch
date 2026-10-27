@@ -1,5 +1,5 @@
 # Runtime-only package for the cached Linux build in fork-image.yml.
-FROM alpine:3.21
+FROM alpine:3.21 AS runtime-base
 RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -g 65532 -S nonroot && \
     adduser -u 65532 -S -G nonroot -h /app nonroot && \
@@ -12,3 +12,23 @@ ENV ONWATCH_DB_PATH=/data/onwatch.db \
 EXPOSE 9211
 USER nonroot
 ENTRYPOINT ["/app/onwatch"]
+
+# Opt-in CLI runtime. The standard image below stays small.
+FROM runtime-base AS runtime-antigravity
+USER root
+ARG AGY_URL=https://storage.googleapis.com/antigravity-public/antigravity-cli/1.4.7-5900205422411776/linux-x64-musl/cli_linux_x64_musl.tar.gz
+ARG AGY_SHA512=13a26ea9058f8ca6839d87ac44063db3c2b45ad55523324e1d6f45a9196b9a8b9eef71f0f1f5359e536a4f3b94f389c488d224bc3a8da740a8ee10f2ba1deacb
+RUN apk add --no-cache libstdc++ libgcc iproute2 && \
+    wget -q -O /tmp/agy.tar.gz "$AGY_URL" && \
+    echo "$AGY_SHA512  /tmp/agy.tar.gz" | sha512sum -c - && \
+    tar -xzf /tmp/agy.tar.gz -C /usr/local/bin antigravity && \
+    mv /usr/local/bin/antigravity /usr/local/bin/agy && \
+    chmod 0755 /usr/local/bin/agy && \
+    rm /tmp/agy.tar.gz
+ENV HOME=/data/antigravity \
+    ANTIGRAVITY_ENABLED=true \
+    ANTIGRAVITY_SOURCE=cli \
+    ANTIGRAVITY_CLI_PATH=/usr/local/bin/agy
+USER nonroot
+
+FROM runtime-base AS runtime
