@@ -1,7 +1,7 @@
-# Apply after the existing Compose file. Build this image on the Docker host.
+# Apply after the existing Compose file.
 services:
   onwatch:
-    image: onwatch-antigravity:local
+    image: ghcr.io/thebadfella/onwatch:1.0.5
     environment:
       ANTIGRAVITY_ENABLED: "true"
       ANTIGRAVITY_SOURCE: cli
