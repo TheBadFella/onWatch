@@ -190,7 +190,8 @@
 .reset-credit-item { margin: 12px 0; }
 .reset-credit-item > * { display: block; margin-top: 4px; }
 .account-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-.account-toolbar h2 { font-size: 16px; margin: 0 0 6px; }
+.account-toolbar h2 { font-size: 20px; margin: 0 0 6px; }
+.account-toolbar > div { min-width: 0; overflow-wrap: anywhere; }
 .account-toolbar p, .connect-help, .login-account-help { color: var(--text-muted); font-size: 13px; line-height: 1.6; margin: 0; }
 .connect-help { margin: 8px 0 16px; }
 .login-account-help { margin-top: 20px; text-align: center; }
