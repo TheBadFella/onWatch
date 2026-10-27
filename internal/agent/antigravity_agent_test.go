@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -227,6 +229,35 @@ func TestAntigravityAgent_WithManualConfig(t *testing.T) {
 	latest, _ := st.QueryLatestAntigravity()
 	if latest == nil {
 		t.Fatal("expected snapshot with manual config")
+	}
+}
+
+func TestAntigravityAgent_CLIPreferenceOverridesManualBridge(t *testing.T) {
+	t.Setenv("ANTIGRAVITY_CLI_PATH", filepath.Join(t.TempDir(), "missing-agy"))
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(antigravityTestResponse()))
+	}))
+	defer server.Close()
+	ag := NewAntigravityAgent(api.NewAntigravityClient(nil), nil, nil, time.Minute, nil, nil,
+		WithAntigravityManualConfig(server.URL, "test-token"))
+	defer func() {
+		if ag.cliRunner != nil {
+			ag.cliRunner.Stop()
+		}
+	}()
+	_, err := ag.fetchSnapshot(context.Background(), api.AntigravitySourceCLI)
+	if !errors.Is(err, api.ErrAgyBinaryNotFound) {
+		t.Fatalf("CLI selection should attempt agy, got %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatal("CLI-only selection contacted the IDE bridge")
+	}
+	snapshot, err := ag.fetchSnapshot(context.Background(), api.AntigravitySourceBoth)
+	if err != nil || snapshot == nil || snapshot.Source != api.AntigravitySourceIDE || requests.Load() != 1 {
+		t.Fatalf("both should fall back to the manual IDE bridge: snapshot=%v err=%v requests=%d", snapshot, err, requests.Load())
 	}
 }
 

@@ -65,3 +65,28 @@ test('reset summary shows banked counts and expiry without confusing missing dat
   assert.notEqual(credits.codexResetSummaryKey(null),credits.codexResetSummaryKey({available_count:0}));
   assert.notEqual(credits.codexResetSummaryKey({available_count:2}),credits.codexResetSummaryKey({available_count:2,next_expires_at:'2026-10-25T21:00:00Z'}));
 });
+
+test('banked reset count expands every credit and refreshes when details change', () => {
+  const c = vm.createContext({document:{addEventListener(){}},
+    escapeHTML:value=>String(value).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;'),
+    formatDateTime:value=>value, formatDuration:()=> '3d'});
+  vm.runInContext(source,c);
+  vm.runInContext(app.slice(app.indexOf('function codexResetCreditsCount('),app.indexOf('function renderCodexQuotaCards(')),c);
+  const data={available_count:2,status:'ok',credits:[
+    {title:'<Full reset>',reset_type:'codex_rate_limits',expires_at:'2026-11-01T12:00:00Z'},
+    {title:'Second reset',unsupported_by_plan:true,expiry_unknown:true}
+  ]};
+  const html=c.codexResetSummaryHTML(data);
+  assert.match(html,/<details class="reset-credit-details"/);
+  assert.match(html,/<summary[^>]*>[\s\S]*2 resets[\s\S]*<\/summary>/);
+  assert.equal((html.match(/class="reset-credit-item"/g)||[]).length,2);
+  assert.match(html,/&lt;Full reset>/);
+  assert.match(html,/Expires: 2026-11-01T12:00:00Z/);
+  assert.match(html,/Expiry unknown/);
+  assert.match(html,/Not supported by this plan/);
+  assert.doesNotMatch(html,/role="img"|tabindex="0"/);
+  assert.notEqual(c.codexResetSummaryKey(data),c.codexResetSummaryKey({...data,credits:[{...data.credits[0],title:'Updated'}]}));
+  assert.match(c.codexResetSummaryHTML({available_count:2,status:'unavailable',credits:[]}),/Individual reset details are unavailable/);
+  assert.match(c.codexResetSummaryHTML({...data,status:'unavailable'}),/Last known details/);
+  assert.doesNotMatch(c.codexResetSummaryHTML({available_count:0,credits:[]}),/<details/);
+});

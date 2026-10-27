@@ -22,13 +22,28 @@ function providerResetHTML(entry) {
 }
 
 function codexResetSummaryKey(credits) {
-  return JSON.stringify([credits?.available_count ?? null, credits?.next_expires_at ?? null, credits?.status ?? null]);
+  return JSON.stringify([credits?.available_count ?? null, credits?.next_expires_at ?? null, credits?.status ?? null, credits?.credits ?? []]);
+}
+
+function codexResetDetailsHTML(credits, count) {
+  const items = Array.isArray(credits.credits) ? credits.credits : [];
+  const rows = items.map((credit, index) => {
+    const expiry = !credit.expiry_unknown && Number.isFinite(Date.parse(credit.expires_at))
+      ? `Expires: ${formatDateTime(credit.expires_at)}` : 'Expiry unknown';
+    const plan = credit.unsupported_by_plan ? 'Not supported by this plan' : 'Banked. Redeem in Codex when eligible.';
+    return `<li class="reset-credit-item"><strong>${escapeHTML(credit.title || `Reset ${index + 1}`)}</strong><span>${escapeHTML(expiry)}</span><span>${escapeHTML(plan)}</span></li>`;
+  }).join('');
+  const stale = credits.status !== 'ok' && items.length
+    ? '<p>Last known details. The latest detail check did not succeed.</p>' : '';
+  const missing = items.length === 0 ? '<p>Individual reset details are unavailable. The count is still reported by Codex.</p>'
+    : items.length < count ? '<p>Details are unavailable for some reported resets.</p>' : '';
+  return `<details class="reset-credit-details"><summary><span class="peak-chip reset-chip">${count} ${count === 1 ? 'reset' : 'resets'}</span><span>View details</span></summary><div class="reset-credit-content">${stale}${rows ? `<ol>${rows}</ol>` : ''}${missing}</div></details>`;
 }
 
 function codexResetSummaryHTML(credits) {
   const known = Number.isFinite(credits?.available_count);
   const count = codexResetCreditsCount(credits);
-  const value = count > 0 ? codexResetCreditsHTML(credits)
+  const value = count > 0 ? codexResetDetailsHTML(credits, count)
     : `<span class="reset-summary-value">${known ? 'None available' : 'Not reported'}</span>`;
   const expiry = count > 0 && Number.isFinite(Date.parse(credits?.next_expires_at))
     ? `<span class="reset-summary-expiry">Next expiry: ${escapeHTML(formatDateTime(credits.next_expires_at))}</span>` : '';
@@ -181,6 +196,7 @@ function patchOverviewNode(current, next) {
   }
   if (current.nodeType !== 1) return;
   for (const attr of [...current.attributes]) {
+    if (attr.name === 'open' && current.matches('details.reset-credit-details')) continue;
     if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);
   }
   for (const attr of next.attributes) {
