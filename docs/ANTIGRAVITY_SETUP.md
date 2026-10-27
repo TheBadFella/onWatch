@@ -130,12 +130,12 @@ Use the `cli` source with an authenticated `agy` installed in the same container
 as onWatch. A forwarded IDE port is tied to the desktop process and its CSRF
 token. Both can change when the IDE restarts, and polling stops when it closes.
 
-The fork offers an optional Linux AMD64 image target with `agy` 1.4.7, verified
-against the official release's SHA-512 checksum. After building the Linux
-onWatch binary as `dist/onwatch-linux-amd64`, build it with:
+The fork's Linux AMD64 image includes `agy` 1.4.7, verified against the official
+release's SHA-512 checksum. Use `ghcr.io/thebadfella/onwatch:1.0.5`, or build it
+locally after building the Linux binary as `dist/onwatch-linux-amd64`:
 
 ```bash
-docker build -f .github/Dockerfile.fork --target runtime-antigravity -t onwatch-antigravity:local .
+docker build -f .github/Dockerfile.fork -t onwatch:local .
 ```
 
 Disable Antigravity polling in Settings before switching images, so its managed
@@ -168,8 +168,7 @@ verify another fresh snapshot. Authentication persistence in a headless
 container depends on the CLI's credential storage and must be checked on the
 deployment. If sign-in does not survive recreation, keep the previous image
 and resolve credential storage before switching production polling. This
-optional image is built locally; the normal published Alpine image does not
-include `agy`.
+published image includes `agy`; no separate bridge or CLI image is needed.
 
 ### Connect to a running IDE manually
 
