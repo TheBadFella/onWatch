@@ -558,6 +558,16 @@ func (a *CodexAgent) maybeAutoStartWindows(ctx context.Context, quotas []api.Cod
 	if len(windows) == 0 {
 		return
 	}
+	// A generation ping consumes every applicable window. Starting a fresh
+	// 5-hour window cannot work while this account's weekly quota is exhausted.
+	for _, q := range quotas {
+		if q.Name == "seven_day" && q.Utilization >= 100 && (q.ResetsAt == nil || q.ResetsAt.After(now)) {
+			for _, window := range windows {
+				a.sendStarterEvent(window, false, "Weekly limit exhausted; no starter request was sent.")
+			}
+			return
+		}
+	}
 	claimed, capped := a.claimStarter()
 	if capped {
 		a.logger.Info("Codex auto quota-starter skipped (rate cap reached)",

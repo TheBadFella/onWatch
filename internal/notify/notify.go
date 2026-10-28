@@ -21,6 +21,7 @@ type NotificationEngine struct {
 	webhookSender       *WebhookSender
 	vapidPublicKey      string
 	mu                  sync.RWMutex
+	starterNotifyMu     sync.Mutex
 	cfg                 NotificationConfig
 	encryptionKey       string // current hex-encoded key for decrypting SMTP passwords
 	legacyEncryptionKey string // fallback hex-encoded key for legacy SMTP password migration
@@ -465,6 +466,9 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 		override, hasOverride = cfg.Overrides[status.QuotaKey]
 	}
 	if status.ResetOccurred {
+		if err := e.store.ClearNotificationLog(provider, "starter:"+quotaKey); err != nil {
+			e.logger.Error("failed to clear starter failure on reset", "error", err)
+		}
 		if err := e.store.ClearNotificationLog(provider, quotaKey); err != nil {
 			e.logger.Error("failed to clear notification log on reset", "error", err)
 		}
@@ -1050,11 +1054,25 @@ type StarterEvent struct {
 
 // SendStarterEvent delivers an auto quota-starter outcome to selected channels.
 //
-// Starter pings are operational events rather than quota-cycle alerts, so they
-// are not written to the notification log and are not deduplicated per cycle.
-// The starter pings once per observed window start and its rate cap bounds
-// retries of failed starts, which bounds how often this can fire.
+// Failures notify once per account/window until a successful start or observed
+// reset clears the durable failure record. Failed delivery remains retryable.
 func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
+	e.starterNotifyMu.Lock()
+	defer e.starterNotifyMu.Unlock()
+	provider := normalizeNotificationProvider(ev.Provider)
+	failureKey := "starter:" + notificationQuotaKey(QuotaStatus{QuotaKey: ev.QuotaKey, AccountID: ev.AccountID})
+	if e.store != nil {
+		if ev.Success {
+			if err := e.store.ClearNotificationLog(provider, failureKey); err != nil {
+				e.logger.Error("failed to clear starter failure after success", "error", err)
+			}
+		} else {
+			sentAt, _, err := e.store.GetLastNotification(provider, failureKey, EventStarterFailure)
+			if err == nil && !sentAt.IsZero() {
+				return
+			}
+		}
+	}
 	e.mu.RLock()
 	channels := channelSet{mailer: e.mailer, webhook: e.webhookSender, enabled: e.cfg.Channels}
 	e.mu.RUnlock()
@@ -1067,7 +1085,6 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		return
 	}
 
-	provider := normalizeNotificationProvider(ev.Provider)
 	account := e.accountName(provider, ev.AccountID)
 	context := providerLabel(provider)
 	if account != "" {
@@ -1080,8 +1097,11 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		message = "OnWatch sent a small starter request to start the limit window. This is separate from the usage reset."
 	}
 	blockedBy := ""
-	if !ev.Success && strings.Contains(ev.Detail, "status code 429") {
+	if !ev.Success && (strings.Contains(ev.Detail, "status code 429") || strings.Contains(ev.Detail, "Weekly limit exhausted")) {
 		message = "The starter request was rate-limited (HTTP 429). Recent usage data could not identify the blocking limit."
+		if strings.Contains(ev.Detail, "Weekly limit exhausted") {
+			message = "The starter was skipped because the latest poll reported exhausted weekly quota."
+		}
 		if provider == "codex" && e.store != nil {
 			accountID, err := strconv.ParseInt(ev.AccountID, 10, 64)
 			if ev.AccountID == "" {
@@ -1120,6 +1140,7 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 
+	sent := false
 	if channels.emailEnabled(event) {
 		body := message
 		if ev.AccountID != "" {
@@ -1130,9 +1151,18 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		}
 		if err := channels.mailer.Send(title, body); err != nil {
 			e.logger.Error("failed to send quota-starter email", "error", err, "event", event)
+		} else {
+			sent = true
 		}
 	}
-	channels.deliverWebhook(e.logger, payload)
+	if channels.deliverWebhook(e.logger, payload) {
+		sent = true
+	}
+	if !ev.Success && sent && e.store != nil {
+		if err := e.store.UpsertNotificationLogAt(provider, failureKey, EventStarterFailure, 0, e.clock()); err != nil {
+			e.logger.Error("failed to record starter failure notification", "error", err)
+		}
+	}
 }
 
 // ResetCreditExpiryAlert describes a banked Codex reset credit that is about to
