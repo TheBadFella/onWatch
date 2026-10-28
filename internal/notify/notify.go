@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1078,9 +1079,33 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		title = fmt.Sprintf("[QUOTA STARTER] %s %s window started", context, quotaLabel(ev.QuotaKey))
 		message = "OnWatch sent a small starter request to start the limit window. This is separate from the usage reset."
 	}
+	blockedBy := ""
+	if !ev.Success && strings.Contains(ev.Detail, "status code 429") {
+		message = "The starter request was rate-limited (HTTP 429). Recent usage data could not identify the blocking limit."
+		if provider == "codex" && e.store != nil {
+			accountID, err := strconv.ParseInt(ev.AccountID, 10, 64)
+			if ev.AccountID == "" {
+				accountID, err = store.DefaultCodexAccountID, nil
+			}
+			if err == nil && accountID > 0 {
+				if snapshot, err := e.store.QueryLatestCodex(accountID); err == nil && snapshot != nil {
+					age := e.clock().Sub(snapshot.CapturedAt)
+					for _, q := range snapshot.Quotas {
+						if q.Name == "seven_day" && q.Utilization >= 100 && age >= 0 && age <= 10*time.Minute && (q.ResetsAt == nil || q.ResetsAt.After(e.clock())) {
+							blockedBy = "Weekly limit"
+							title = fmt.Sprintf("[QUOTA STARTER] %s %s could not start: weekly limit exhausted", context, quotaLabel(ev.QuotaKey))
+							message = fmt.Sprintf("The %s could not start. This account's latest usage report shows its weekly limit exhausted (%.1f%% used). Weekly reset: %s. Wait for the weekly reset or use another account with available quota.", quotaLabel(ev.QuotaKey), q.Utilization, notificationTime(q.ResetsAt))
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 	if ev.Detail != "" {
 		message = message + " " + ev.Detail
 	}
+	weeklyUsage := e.weeklyUsage(QuotaStatus{Provider: provider, AccountID: ev.AccountID})
 
 	payload := WebhookPayload{
 		Event:       event,
@@ -1088,6 +1113,8 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		QuotaKey:    ev.QuotaKey,
 		AccountID:   ev.AccountID,
 		AccountName: account,
+		WeeklyUsage: weeklyUsage,
+		BlockedBy:   blockedBy,
 		Title:       title,
 		Message:     message,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -1097,6 +1124,9 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		body := message
 		if ev.AccountID != "" {
 			body += "\nAccount: " + account
+		}
+		if weeklyUsage != "" {
+			body += "\nWeekly limit: " + weeklyUsage
 		}
 		if err := channels.mailer.Send(title, body); err != nil {
 			e.logger.Error("failed to send quota-starter email", "error", err, "event", event)
