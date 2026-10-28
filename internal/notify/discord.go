@@ -140,6 +140,9 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 			fields = append(fields, discordEmbedField{Name: name, Value: discordTime(&t)})
 		}
 	}
+	if payload.WeeklyUsage != "" {
+		fields = append(fields, discordEmbedField{Name: "Weekly limit", Value: discordLimit(payload.WeeklyUsage, 1024)})
+	}
 	ts := payload.Timestamp
 	if ts == "" {
 		ts = time.Now().UTC().Format(time.RFC3339)

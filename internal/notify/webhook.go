@@ -130,6 +130,7 @@ type WebhookPayload struct {
 	QuotaKey    string                       `json:"quota_key,omitempty"`
 	AccountID   string                       `json:"account_id,omitempty"`
 	AccountName string                       `json:"account_name,omitempty"`
+	WeeklyUsage string                       `json:"weekly_usage,omitempty"`
 	Reset       *store.CodexResetObservation `json:"reset,omitempty"`
 	Utilization *float64                     `json:"utilization,omitempty"`
 	Limit       *float64                     `json:"limit,omitempty"`
