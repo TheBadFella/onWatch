@@ -92,3 +92,42 @@ func notificationTime(t *time.Time) string {
 func remainingPercent(used float64) float64 {
 	return max(0, min(100, 100-used))
 }
+
+// weeklyUsage uses the latest persisted poll for the notification's own account.
+func (e *NotificationEngine) weeklyUsage(status QuotaStatus) string {
+	if e.store == nil {
+		return ""
+	}
+	format := func(used float64, reset *time.Time, observed time.Time) string {
+		return fmt.Sprintf("%.1f%% used | %.1f%% remaining\nResets: %s\nObserved: %s", used, remainingPercent(used), notificationTime(reset), notificationTime(&observed))
+	}
+	switch status.Provider {
+	case "codex":
+		accountID := int64(1)
+		if status.AccountID != "" {
+			var err error
+			accountID, err = strconv.ParseInt(status.AccountID, 10, 64)
+			if err != nil || accountID <= 0 {
+				return "Not reported"
+			}
+		}
+		if snapshot, err := e.store.QueryLatestCodex(accountID); err == nil && snapshot != nil {
+			for _, q := range snapshot.Quotas {
+				if q.Name == "seven_day" || q.Name == "weekly" {
+					return format(q.Utilization, q.ResetsAt, snapshot.CapturedAt)
+				}
+			}
+		}
+		return "Not reported"
+	case "anthropic":
+		if snapshot, err := e.store.QueryLatestAnthropic(); err == nil && snapshot != nil {
+			for _, q := range snapshot.Quotas {
+				if q.Name == "seven_day" {
+					return format(q.Utilization, q.ResetsAt, snapshot.CapturedAt)
+				}
+			}
+		}
+		return "Not reported"
+	}
+	return ""
+}

@@ -74,6 +74,7 @@ type QuotaStatus struct {
 	QuotaKey      string
 	AccountID     string // For multi-account providers (e.g., Codex)
 	AccountName   string
+	WeeklyUsage   string
 	Reset         *store.CodexResetObservation
 	Utilization   float64
 	Limit         float64
@@ -628,6 +629,7 @@ func (e *NotificationEngine) sendNotification(channels channelSet, policy repeat
 	}
 
 	status.AccountName = e.accountName(status.Provider, status.AccountID)
+	status.WeeklyUsage = e.weeklyUsage(status)
 	subject := e.buildSubject(status, notifType)
 	body := e.buildBody(status, notifType)
 	sent := false
@@ -767,6 +769,9 @@ func (e *NotificationEngine) buildBody(status QuotaStatus, notifType string) str
 	}
 	if !status.ResetAt.IsZero() && status.Reset == nil {
 		fmt.Fprintf(&sb, "Next reset: %s\n", notificationTime(&status.ResetAt))
+	}
+	if status.WeeklyUsage != "" {
+		fmt.Fprintf(&sb, "Weekly limit: %s\n", status.WeeklyUsage)
 	}
 	sb.WriteString("\nOnWatch")
 	return sb.String()
@@ -953,6 +958,7 @@ func webhookPayloadForQuota(status QuotaStatus, event, title, message string, th
 		QuotaKey:    status.QuotaKey,
 		AccountID:   status.AccountID,
 		AccountName: status.AccountName,
+		WeeklyUsage: status.WeeklyUsage,
 		Reset:       status.Reset,
 		Title:       title,
 		Message:     message,
