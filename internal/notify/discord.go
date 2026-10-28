@@ -127,6 +127,10 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	}
 	if payload.Event == EventStarterFailure {
 		title = "⚠️ " + context + " | Window could not start"
+		if payload.BlockedBy != "" {
+			title = "⚠️ " + context + " | " + payload.BlockedBy + " exhausted"
+			fields = append(fields, discordEmbedField{Name: "Blocked by", Value: payload.BlockedBy})
+		}
 	}
 	if payload.Event == EventResetCreditExpiry {
 		title = "⌛ " + context + " | Banked reset expires soon"
