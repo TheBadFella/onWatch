@@ -754,6 +754,8 @@ function updateAntigravityAccountActive() {
   if (label) {
     const active = (State.antigravityAccounts || []).find(a => a.id === State.antigravityAccount);
     label.textContent = active ? active.name : 'Default account';
+    const heading = document.getElementById('antigravity-selected-account-name');
+    if (heading) heading.textContent = active ? active.name : 'Antigravity account';
   }
   menu.querySelectorAll('.codex-profile-item').forEach(item => {
     const isActive = parseInt(item.dataset.accountId, 10) === State.antigravityAccount;

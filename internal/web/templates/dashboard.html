@@ -132,6 +132,7 @@
         <div class="quota-grid" id="quota-grid-codex" data-provider="codex"></div>
         {{else if eq .CurrentProvider "antigravity"}}
         <!-- Antigravity quota cards (dynamically populated by JS) -->
+        <div class="account-toolbar"><div><h2 id="antigravity-selected-account-name" aria-live="polite">Antigravity account</h2></div></div>
         <div class="provider-source-badge" id="antigravity-source-badge" hidden></div>
         <div class="quota-grid" id="quota-grid-antigravity" data-provider="antigravity"></div>
         {{else if eq .CurrentProvider "minimax"}}
