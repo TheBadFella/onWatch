@@ -39,6 +39,7 @@ The test button uses the *saved* configuration, so save before testing.
 | `starter_success` | The Codex auto quota-starter successfully started a limit window |
 | `starter_failure` | The Codex auto quota-starter ping failed |
 | `reset_credit_expiry` | A banked Codex reset expires within 24 hours |
+| `reset_credit_grant` | A new banked Codex reset credit became available |
 | `test` | You press **Send Test Webhook** |
 
 A newly added event is off for webhooks that already exist: its stored value is
@@ -201,7 +202,8 @@ for evidence rules and upgrade behavior.
 Email Events and Webhook Events each offer **Quota exhausted** (`exhausted`,
 100% used) and **Window resets soon** (`reset_soon`). Both default off. Warning
 and critical events still use the configured usage thresholds. Banked reset
-expiry can also be selected separately for SMTP and webhook delivery.
+expiry and newly granted reset credits can also be selected separately for
+SMTP and webhook delivery.
 
 Set **Notifications → Window ending reminders → Minutes before reset** to choose
 the lead time, from 1 to 1440 minutes (default 15). Each selected channel gets

@@ -94,6 +94,13 @@ type MiniMaxAccountReloader interface {
 	Reload()
 }
 
+// AntigravityAccountController exposes live per-account Antigravity state to
+// the dashboard and reloads agents after account changes.
+type AntigravityAccountController interface {
+	Reload()
+	TrackerForAccount(accountID int64) *tracker.AntigravityTracker
+}
+
 // CodexPauseReporter reports which Codex accounts are paused pending
 // re-authentication, keyed by database account ID (issue #147).
 type CodexPauseReporter interface {
@@ -102,42 +109,43 @@ type CodexPauseReporter interface {
 
 // Handler handles HTTP requests for the web dashboard
 type Handler struct {
-	costFXMu           sync.Mutex
-	costFXAttempt      time.Time
-	costFX             *costExchange
-	costFXClient       *http.Client
-	store              *store.Store
-	tracker            *tracker.Tracker
-	zaiTracker         *tracker.ZaiTracker
-	anthropicTracker   *tracker.AnthropicTracker
-	copilotTracker     *tracker.CopilotTracker
-	codexTracker       *tracker.CodexTracker
-	antigravityTracker *tracker.AntigravityTracker
-	minimaxTracker     *tracker.MiniMaxTracker
-	geminiTracker      *tracker.GeminiTracker
-	openrouterTracker  *tracker.OpenRouterTracker
-	moonshotTracker    *tracker.MoonshotTracker
-	deepseekTracker    *tracker.DeepSeekTracker
-	cursorTracker      *tracker.CursorTracker
-	grokTracker        *tracker.GrokTracker
-	kimiTracker        *tracker.KimiTracker
-	opencodeTracker    *tracker.OpenCodeTracker
-	ollamaTracker      *tracker.OllamaTracker
-	museTracker        *tracker.MuseTracker
-	commandCodeTracker *tracker.CommandCodeTracker
-	updater            *update.Updater
-	notifier           Notifier
-	agentManager       ProviderAgentController
-	minimaxAgentMgr    MiniMaxAccountReloader
-	logger             *slog.Logger
-	dashboardTmpl      *template.Template
-	loginTmpl          *template.Template
-	settingsTmpl       *template.Template
-	sessions           *SessionStore
-	config             *config.Config
-	metrics            *metrics.Metrics
-	version            string
-	codexPauseReporter CodexPauseReporter
+	costFXMu            sync.Mutex
+	costFXAttempt       time.Time
+	costFX              *costExchange
+	costFXClient        *http.Client
+	store               *store.Store
+	tracker             *tracker.Tracker
+	zaiTracker          *tracker.ZaiTracker
+	anthropicTracker    *tracker.AnthropicTracker
+	copilotTracker      *tracker.CopilotTracker
+	codexTracker        *tracker.CodexTracker
+	antigravityTracker  *tracker.AntigravityTracker
+	minimaxTracker      *tracker.MiniMaxTracker
+	geminiTracker       *tracker.GeminiTracker
+	openrouterTracker   *tracker.OpenRouterTracker
+	moonshotTracker     *tracker.MoonshotTracker
+	deepseekTracker     *tracker.DeepSeekTracker
+	cursorTracker       *tracker.CursorTracker
+	grokTracker         *tracker.GrokTracker
+	kimiTracker         *tracker.KimiTracker
+	opencodeTracker     *tracker.OpenCodeTracker
+	ollamaTracker       *tracker.OllamaTracker
+	museTracker         *tracker.MuseTracker
+	commandCodeTracker  *tracker.CommandCodeTracker
+	updater             *update.Updater
+	notifier            Notifier
+	agentManager        ProviderAgentController
+	minimaxAgentMgr     MiniMaxAccountReloader
+	antigravityAgentMgr AntigravityAccountController
+	logger              *slog.Logger
+	dashboardTmpl       *template.Template
+	loginTmpl           *template.Template
+	settingsTmpl        *template.Template
+	sessions            *SessionStore
+	config              *config.Config
+	metrics             *metrics.Metrics
+	version             string
+	codexPauseReporter  CodexPauseReporter
 	// pollStatus is the agent-side last-poll-outcome registry (classes only,
 	// never raw error text) used to explain stale menubar cards.
 	pollStatus        *agent.PollStatusRegistry
@@ -989,6 +997,61 @@ func (h *Handler) SetRateLimiter(l *LoginRateLimiter) {
 // SetMiniMaxAgentManager sets the MiniMax agent manager for hot-reload on account changes.
 func (h *Handler) SetMiniMaxAgentManager(m MiniMaxAccountReloader) {
 	h.minimaxAgentMgr = m
+}
+
+// SetAntigravityAgentManager sets the multi-account Antigravity manager.
+func (h *Handler) SetAntigravityAgentManager(m AntigravityAccountController) {
+	h.antigravityAgentMgr = m
+}
+
+// parseAntigravityAccountID reads the account query parameter, falling back to
+// the default Antigravity account.
+func (h *Handler) parseAntigravityAccountID(r *http.Request) int64 {
+	if raw := r.URL.Query().Get("account"); raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil && id > 0 {
+			return id
+		}
+	}
+	return h.defaultAntigravityAccountID()
+}
+
+// defaultAntigravityAccountID returns the provider_accounts.id for the default
+// Antigravity account.
+func (h *Handler) defaultAntigravityAccountID() int64 {
+	if h.store == nil {
+		return 0
+	}
+	accounts, err := h.store.QueryActiveProviderAccounts("antigravity")
+	if err != nil {
+		return 0
+	}
+	for _, account := range accounts {
+		if account.Name == "default" {
+			return account.ID
+		}
+	}
+	return 0
+}
+
+// antigravityTrackerFor returns the live tracker for an account, falling back to
+// the single legacy tracker when no manager is wired.
+func (h *Handler) antigravityTrackerFor(accountID int64) *tracker.AntigravityTracker {
+	if h.antigravityAgentMgr != nil {
+		if t := h.antigravityAgentMgr.TrackerForAccount(accountID); t != nil {
+			return t
+		}
+	}
+	return h.antigravityTracker
+}
+
+// antigravityAccountName returns the configured account name, or the ID as text.
+func (h *Handler) antigravityAccountName(accountID int64) string {
+	if h.store != nil {
+		if account, err := h.store.GetProviderAccountByID(accountID); err == nil && account != nil {
+			return account.Name
+		}
+	}
+	return strconv.FormatInt(accountID, 10)
 }
 
 // SetCodexPauseReporter wires the Codex agent manager so /api/current can flag
@@ -3134,7 +3197,7 @@ func (h *Handler) currentBoth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if h.config.HasProvider("antigravity") && providerTelemetryEnabled(visibility, "antigravity") {
-		response["antigravity"] = h.buildAntigravityCurrent()
+		response["antigravity"] = h.buildAntigravityCurrent(h.parseAntigravityAccountID(r))
 	}
 	if h.config.HasProvider("minimax") && providerTelemetryEnabled(visibility, "minimax") {
 		minimaxAccounts := h.minimaxUsageAccounts()
@@ -3797,7 +3860,7 @@ func (h *Handler) historyBoth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.config.HasProvider("antigravity") && providerTelemetryEnabled(visibility, "antigravity") && h.store != nil {
-		snapshots, err := h.store.QueryAntigravityRangeSampled(start, now)
+		snapshots, err := h.store.QueryAntigravityRangeSampled(start, now, h.parseAntigravityAccountID(r))
 		if err != nil {
 			historyErrors["antigravity"] = "history read failed"
 		} else {
@@ -4887,14 +4950,15 @@ func (h *Handler) cyclesBoth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.config.HasProvider("antigravity") {
-		modelIDs, err := h.store.QueryAllAntigravityModelIDs()
+		acct := h.parseAntigravityAccountID(r)
+		modelIDs, err := h.store.QueryAllAntigravityModelIDs(acct)
 		if err == nil {
 			var antigravityCycles []map[string]interface{}
 			for _, modelID := range modelIDs {
-				if active, err := h.store.QueryActiveAntigravityCycle(modelID); err == nil && active != nil {
+				if active, err := h.store.QueryActiveAntigravityCycle(modelID, acct); err == nil && active != nil {
 					antigravityCycles = append(antigravityCycles, antigravityCycleToMap(active))
 				}
-				if history, err := h.store.QueryAntigravityCycleHistory(modelID, 50); err == nil {
+				if history, err := h.store.QueryAntigravityCycleHistoryForAccount(acct, modelID, 50); err == nil {
 					for _, c := range history {
 						antigravityCycles = append(antigravityCycles, antigravityCycleToMap(c))
 					}
@@ -5195,7 +5259,7 @@ func (h *Handler) summaryBoth(w http.ResponseWriter, r *http.Request) {
 		response["codex"] = h.buildCodexSummaryMap(DefaultCodexAccountID)
 	}
 	if h.config.HasProvider("antigravity") {
-		response["antigravity"] = h.buildAntigravitySummaryMap()
+		response["antigravity"] = h.buildAntigravitySummaryMap(h.parseAntigravityAccountID(r))
 	}
 	if h.config.HasProvider("minimax") {
 		response["minimax"] = h.buildMiniMaxSummaryMap(h.defaultMiniMaxAccountID())
@@ -5254,16 +5318,21 @@ func (h *Handler) summarySynthetic(w http.ResponseWriter, r *http.Request) {
 
 // summaryAntigravity returns Antigravity usage summary.
 func (h *Handler) summaryAntigravity(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, h.buildAntigravitySummaryMap())
+	respondJSON(w, http.StatusOK, h.buildAntigravitySummaryMap(h.parseAntigravityAccountID(r)))
 }
 
-func (h *Handler) buildAntigravitySummaryMap() map[string]interface{} {
+func (h *Handler) buildAntigravitySummaryMap(accountID ...int64) map[string]interface{} {
 	response := map[string]interface{}{}
 	if h.store == nil {
 		return response
 	}
+	acct := h.defaultAntigravityAccountID()
+	if len(accountID) > 0 && accountID[0] > 0 {
+		acct = accountID[0]
+	}
+	tr := h.antigravityTrackerFor(acct)
 
-	latest, err := h.store.QueryLatestAntigravity()
+	latest, err := h.store.QueryLatestAntigravity(acct)
 	if err != nil {
 		h.logger.Error("failed to query latest Antigravity snapshot", "error", err)
 		return response
@@ -5296,7 +5365,7 @@ func (h *Handler) buildAntigravitySummaryMap() map[string]interface{} {
 			item["timeUntilReset"] = formatDuration(group.TimeUntilReset)
 		}
 
-		if h.antigravityTracker != nil {
+		if tr != nil {
 			currentRate := 0.0
 			projectedUsage := 0.0
 			completedCycles := 0
@@ -5307,7 +5376,7 @@ func (h *Handler) buildAntigravitySummaryMap() map[string]interface{} {
 			var trackingSince *time.Time
 
 			for _, modelID := range group.ModelIDs {
-				summary, err := h.antigravityTracker.UsageSummary(modelID)
+				summary, err := tr.UsageSummary(modelID)
 				if err != nil || summary == nil {
 					continue
 				}
@@ -5555,6 +5624,8 @@ func (h *Handler) Sessions(w http.ResponseWriter, r *http.Request) {
 		sessions, queryErr = h.queryCodexSessionsByAccount(accountID)
 	} else if provider == "minimax" {
 		sessions, queryErr = h.queryMiniMaxSessions(h.parseMiniMaxAccountID(r))
+	} else if provider == "antigravity" {
+		sessions, queryErr = h.queryAntigravitySessions(h.parseAntigravityAccountID(r))
 	} else {
 		sessions, queryErr = h.store.QuerySessionHistory(h.mistralSessionProvider(provider))
 	}
@@ -5599,6 +5670,22 @@ func minimaxSessionTimeChanged(a, b *time.Time) bool {
 	default:
 		return a.Sub(*b).Abs() > time.Second
 	}
+}
+
+// queryAntigravitySessions returns the selected account's sessions. The legacy
+// single-account key is used only as a fallback for the default account.
+func (h *Handler) queryAntigravitySessions(accountID int64) ([]*store.Session, error) {
+	if h.store == nil {
+		return []*store.Session{}, nil
+	}
+	if accountID <= 0 {
+		accountID = h.defaultAntigravityAccountID()
+	}
+	sessions, err := h.store.QuerySessionHistory(fmt.Sprintf("antigravity:%d", accountID))
+	if err == nil && len(sessions) == 0 && accountID == h.defaultAntigravityAccountID() {
+		return h.store.QuerySessionHistory("antigravity")
+	}
+	return sessions, err
 }
 
 func (h *Handler) queryMiniMaxSessions(accountID int64) ([]*store.Session, error) {
@@ -5733,6 +5820,8 @@ func (h *Handler) sessionsBoth(w http.ResponseWriter, r *http.Request) {
 			sessions, err = h.queryCodexSessionsByAccount(codexAccountID)
 		} else if provider == "minimax" {
 			sessions, err = h.queryMiniMaxSessions(h.parseMiniMaxAccountID(r))
+		} else if provider == "antigravity" {
+			sessions, err = h.queryAntigravitySessions(h.parseAntigravityAccountID(r))
 		} else {
 			sessions, err = h.store.QuerySessionHistory(h.mistralSessionProvider(provider))
 		}
@@ -7906,6 +7995,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			NotifyReset             bool    `json:"notify_reset"`
 			NotifyAuthError         bool    `json:"notify_auth_error"`
 			NotifyResetCreditExpiry *bool   `json:"notify_reset_credit_expiry"`
+			NotifyResetCreditGrant  *bool   `json:"notify_reset_credit_grant"`
 			NotifyRepeat            bool    `json:"notify_repeat"`
 			CooldownMinutes         int     `json:"cooldown_minutes"`
 			// Channels is a pointer so an omitted value keeps the stored
@@ -7974,11 +8064,12 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		// Preserve the stored channel selection and the reset-credit toggle
 		// when the client omits them. The reset-credit warning defaults on when
 		// it has never been saved.
-		if notif.Channels == nil || notif.NotifyResetCreditExpiry == nil {
+		if notif.Channels == nil || notif.NotifyResetCreditExpiry == nil || notif.NotifyResetCreditGrant == nil {
 			if existingJSON, _ := h.store.GetSetting("notifications"); existingJSON != "" {
 				var existing struct {
 					Channels                *notify.NotificationChannels `json:"channels"`
 					NotifyResetCreditExpiry *bool                        `json:"notify_reset_credit_expiry"`
+					NotifyResetCreditGrant  *bool                        `json:"notify_reset_credit_grant"`
 				}
 				if json.Unmarshal([]byte(existingJSON), &existing) == nil {
 					if notif.Channels == nil {
@@ -7986,6 +8077,9 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 					}
 					if notif.NotifyResetCreditExpiry == nil {
 						notif.NotifyResetCreditExpiry = existing.NotifyResetCreditExpiry
+					}
+					if notif.NotifyResetCreditGrant == nil {
+						notif.NotifyResetCreditGrant = existing.NotifyResetCreditGrant
 					}
 				}
 			}
@@ -10014,18 +10108,23 @@ func codexQuotaDisplayOrder(name string) int {
 
 // currentAntigravity returns current Antigravity quota status.
 func (h *Handler) currentAntigravity(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, h.buildAntigravityCurrent())
+	respondJSON(w, http.StatusOK, h.buildAntigravityCurrent(h.parseAntigravityAccountID(r)))
 }
 
 // buildAntigravityCurrent builds the Antigravity current quota response map.
-func (h *Handler) buildAntigravityCurrent() map[string]interface{} {
-	response, _, _ := h.buildAntigravityCurrentOK()
+func (h *Handler) buildAntigravityCurrent(accountID ...int64) map[string]interface{} {
+	response, _, _ := h.buildAntigravityCurrentOK(accountID...)
 	return response
 }
 
 // buildAntigravityCurrentOK is buildAntigravityCurrent with an explicit storage
 // outcome. readOK is false only when the store read itself failed.
-func (h *Handler) buildAntigravityCurrentOK() (response map[string]interface{}, readOK bool, hasData bool) {
+func (h *Handler) buildAntigravityCurrentOK(accountID ...int64) (response map[string]interface{}, readOK bool, hasData bool) {
+	acct := h.defaultAntigravityAccountID()
+	if len(accountID) > 0 && accountID[0] > 0 {
+		acct = accountID[0]
+	}
+	tr := h.antigravityTrackerFor(acct)
 	now := time.Now().UTC()
 	response = map[string]interface{}{
 		"capturedAt": now.Format(time.RFC3339),
@@ -10037,7 +10136,7 @@ func (h *Handler) buildAntigravityCurrentOK() (response map[string]interface{}, 
 		return response, true, false
 	}
 
-	latest, err := h.store.QueryLatestAntigravity()
+	latest, err := h.store.QueryLatestAntigravity(acct)
 	if err != nil {
 		h.logger.Error("failed to query latest Antigravity snapshot", "error", err)
 		return response, false, false
@@ -10061,11 +10160,13 @@ func (h *Handler) buildAntigravityCurrentOK() (response map[string]interface{}, 
 	if latest.Source != "" && latest.Source != "unknown" {
 		response["source"] = latest.Source
 	}
+	response["accountId"] = acct
+	response["accountName"] = h.antigravityAccountName(acct)
 
 	// The agy CLI source reports bucket rows (weekly + 5h per group); render them
 	// directly rather than collapsing into the IDE's logical model groups.
 	if latest.Source == api.AntigravitySourceCLI {
-		quotas := h.buildAntigravityCLIQuotas(latest.Models)
+		quotas := h.buildAntigravityCLIQuotas(latest.Models, tr)
 		response["quotas"] = quotas
 		response["pools"] = quotas
 		if lowest := lowestAntigravityPool(quotas); lowest != nil {
@@ -10103,11 +10204,11 @@ func (h *Handler) buildAntigravityCurrentOK() (response map[string]interface{}, 
 			qMap["timeUntilResetSeconds"] = int64(timeUntilReset.Seconds())
 		}
 
-		if h.antigravityTracker != nil {
+		if tr != nil {
 			groupRate := 0.0
 			groupProjected := 0.0
 			for _, modelID := range g.ModelIDs {
-				if summary, err := h.antigravityTracker.UsageSummary(modelID); err == nil && summary != nil {
+				if summary, err := tr.UsageSummary(modelID); err == nil && summary != nil {
 					groupRate += summary.CurrentRate
 					groupProjected += summary.ProjectedUsage
 				}
@@ -10130,7 +10231,7 @@ func (h *Handler) buildAntigravityCurrentOK() (response map[string]interface{}, 
 
 // buildAntigravityCLIQuotas renders agy CLI bucket rows (one card per bucket,
 // e.g. Gemini Weekly/5h, Claude+GPT Weekly/5h) in stable display order.
-func (h *Handler) buildAntigravityCLIQuotas(models []api.AntigravityModelQuota) []map[string]interface{} {
+func (h *Handler) buildAntigravityCLIQuotas(models []api.AntigravityModelQuota, tr *tracker.AntigravityTracker) []map[string]interface{} {
 	ordered := make([]api.AntigravityModelQuota, len(models))
 	copy(ordered, models)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -10169,8 +10270,8 @@ func (h *Handler) buildAntigravityCLIQuotas(models []api.AntigravityModelQuota) 
 			qMap["timeUntilReset"] = formatDuration(timeUntilReset)
 			qMap["timeUntilResetSeconds"] = int64(timeUntilReset.Seconds())
 		}
-		if h.antigravityTracker != nil {
-			if summary, err := h.antigravityTracker.UsageSummary(m.ModelID); err == nil && summary != nil {
+		if tr != nil {
+			if summary, err := tr.UsageSummary(m.ModelID); err == nil && summary != nil {
 				qMap["currentRate"] = summary.CurrentRate
 				qMap["projectedUsage"] = summary.ProjectedUsage
 			}
@@ -10209,27 +10310,31 @@ func antigravityUsageStatus(usagePercent float64) string {
 // insightsAntigravity returns Antigravity-specific deep analytics.
 func (h *Handler) insightsAntigravity(w http.ResponseWriter, r *http.Request, rangeDur time.Duration) {
 	hidden := h.getHiddenInsightKeys()
-	respondInsights(w, h.buildAntigravityInsights(hidden, rangeDur))
+	respondInsights(w, h.buildAntigravityInsights(hidden, rangeDur, h.parseAntigravityAccountID(r)))
 }
 
 // buildAntigravityInsights builds Antigravity insights focused on burn rates and exhaustion forecast.
-func (h *Handler) buildAntigravityInsights(hidden map[string]bool, rangeDur time.Duration) insightsResponse {
+func (h *Handler) buildAntigravityInsights(hidden map[string]bool, rangeDur time.Duration, accountID ...int64) insightsResponse {
 	resp := insightsResponse{Stats: []insightStat{}, Insights: []insightItem{}}
 
 	if h.store == nil {
 		return resp
 	}
+	acct := h.defaultAntigravityAccountID()
+	if len(accountID) > 0 && accountID[0] > 0 {
+		acct = accountID[0]
+	}
 
 	now := time.Now().UTC()
 	rangeStart := now.Add(-rangeDur)
-	latest, err := h.store.QueryLatestAntigravity()
+	latest, err := h.store.QueryLatestAntigravity(acct)
 	markPartial(&resp.partial, err)
 	if err != nil || latest == nil {
 		return resp
 	}
 
 	groups := api.GroupAntigravityModelsByLogicalQuota(latest.Models)
-	pollCount, firstPoll, lastPoll, err := h.store.QueryAntigravityRangeStats(rangeStart, now)
+	pollCount, firstPoll, lastPoll, err := h.store.QueryAntigravityRangeStats(rangeStart, now, acct)
 	markPartial(&resp.partial, err)
 	if err != nil {
 		pollCount = 0
@@ -10247,7 +10352,7 @@ func (h *Handler) buildAntigravityInsights(hidden map[string]bool, rangeDur time
 		stats := burnRateStats{}
 
 		for _, modelID := range group.ModelIDs {
-			cycles, err := h.store.QueryAntigravityCycleHistory(modelID, 200)
+			cycles, err := h.store.QueryAntigravityCycleHistoryForAccount(acct, modelID, 200)
 			if err == nil {
 				var sum float64
 				var count int
@@ -10276,7 +10381,7 @@ func (h *Handler) buildAntigravityInsights(hidden map[string]bool, rangeDur time
 				}
 			}
 
-			if active, err := h.store.QueryActiveAntigravityCycle(modelID); err == nil && active != nil {
+			if active, err := h.store.QueryActiveAntigravityCycle(modelID, acct); err == nil && active != nil {
 				dur := now.Sub(active.CycleStart)
 				if dur > 0 && active.TotalDelta > 0 {
 					rate := (active.TotalDelta * 100) / dur.Hours()
@@ -10422,7 +10527,8 @@ func (h *Handler) historyAntigravity(w http.ResponseWriter, r *http.Request) {
 	end := time.Now().UTC()
 	start := end.Add(-duration)
 
-	snapshots, err := h.store.QueryAntigravityRangeSampled(start, end)
+	acct := h.parseAntigravityAccountID(r)
+	snapshots, err := h.store.QueryAntigravityRangeSampled(start, end, acct)
 	if err != nil {
 		h.logger.Error("failed to query antigravity history", "error", err)
 		respondError(w, http.StatusInternalServerError, "failed to load history")
@@ -10606,7 +10712,8 @@ func (h *Handler) cyclesAntigravity(w http.ResponseWriter, r *http.Request) {
 
 	response := []map[string]interface{}{}
 
-	active, err := h.store.QueryActiveAntigravityCycle(modelID)
+	acct := h.parseAntigravityAccountID(r)
+	active, err := h.store.QueryActiveAntigravityCycle(modelID, acct)
 	if err != nil {
 		h.logger.Error("failed to query active Antigravity cycle", "error", err)
 		respondError(w, http.StatusInternalServerError, "failed to query cycles")
@@ -10616,7 +10723,7 @@ func (h *Handler) cyclesAntigravity(w http.ResponseWriter, r *http.Request) {
 		response = append(response, antigravityCycleToMap(active))
 	}
 
-	history, err := h.store.QueryAntigravityCycleHistory(modelID, 200)
+	history, err := h.store.QueryAntigravityCycleHistoryForAccount(acct, modelID, 200)
 	if err != nil {
 		h.logger.Error("failed to query Antigravity cycle history", "error", err)
 		respondError(w, http.StatusInternalServerError, "failed to query cycles")
@@ -10718,6 +10825,32 @@ func (h *Handler) minimaxUsageAccountsOK() (accounts []menubarAccountUsage, enum
 		usage["accountName"] = acc.Name
 		usage["id"] = acc.ID
 		usage["name"] = acc.Name
+		accounts = append(accounts, menubarAccountUsage{Usage: usage, ReadOK: readOK, HasData: hasData})
+	}
+	return accounts, true
+}
+
+// antigravityUsageAccountsOK enumerates active Antigravity accounts with their
+// current usage, so the menubar can show one card per account. enumerated is
+// false only when the account list itself could not be read.
+func (h *Handler) antigravityUsageAccountsOK() (accounts []menubarAccountUsage, enumerated bool) {
+	if h.store == nil {
+		return nil, true
+	}
+	rows, err := h.store.QueryActiveProviderAccounts("antigravity")
+	if err != nil {
+		h.logger.Error("failed to query Antigravity accounts", "error", err)
+		return nil, false
+	}
+	if len(rows) == 0 {
+		if defID := h.defaultAntigravityAccountID(); defID > 0 {
+			rows = []store.ProviderAccount{{ID: defID, Name: "default"}}
+		}
+	}
+	for _, acc := range rows {
+		usage, readOK, hasData := h.buildAntigravityCurrentOK(acc.ID)
+		usage["accountId"] = acc.ID
+		usage["accountName"] = acc.Name
 		accounts = append(accounts, menubarAccountUsage{Usage: usage, ReadOK: readOK, HasData: hasData})
 	}
 	return accounts, true
@@ -12634,7 +12767,8 @@ func (h *Handler) cycleOverviewAntigravity(w http.ResponseWriter, r *http.Reques
 	groupBy := normalizeAntigravityGroupBy(r.URL.Query().Get("groupBy"))
 	limit := parseCycleOverviewLimit(r)
 
-	rows, err := h.store.QueryAntigravityCycleOverview(groupBy, limit)
+	acct := h.parseAntigravityAccountID(r)
+	rows, err := h.store.QueryAntigravityCycleOverview(groupBy, limit, acct)
 	if err != nil {
 		h.logger.Error("failed to query Antigravity cycle overview", "error", err)
 		respondError(w, http.StatusInternalServerError, "failed to query cycle overview")
@@ -12644,10 +12778,12 @@ func (h *Handler) cycleOverviewAntigravity(w http.ResponseWriter, r *http.Reques
 	quotaNames := api.AntigravityQuotaGroupOrder()
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"groupBy":    groupBy,
-		"provider":   "antigravity",
-		"quotaNames": quotaNames,
-		"cycles":     cycleOverviewRowsToJSON(rows),
+		"groupBy":     groupBy,
+		"provider":    "antigravity",
+		"accountId":   acct,
+		"accountName": h.antigravityAccountName(acct),
+		"quotaNames":  quotaNames,
+		"cycles":      cycleOverviewRowsToJSON(rows),
 	})
 }
 
@@ -13172,7 +13308,8 @@ func (h *Handler) loggingHistoryAntigravity(w http.ResponseWriter, r *http.Reque
 	}
 
 	start, end, limit := h.loggingHistoryRangeAndLimit(r)
-	snapshots, err := h.store.QueryAntigravityRange(start, end, limit)
+	acct := h.parseAntigravityAccountID(r)
+	snapshots, err := h.store.QueryAntigravityRangeForAccount(acct, start, end, limit)
 	if err != nil {
 		h.logger.Error("failed to query Antigravity snapshots", "error", err)
 		respondError(w, http.StatusInternalServerError, "failed to query logging history")

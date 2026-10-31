@@ -148,7 +148,7 @@ func (s *Store) MistralHistory(ctx context.Context, start, end time.Time, limit 
 	// before joining. The identity filter has to stay inside it too, or it no
 	// longer bounds what LIMIT sees.
 	rows, e := s.db.QueryContext(ctx, `SELECT r.id,r.identity,r.captured_at,r.status,q.quota_name,q.used,q.limit_value,q.utilization,q.currency,q.resets_at,b.amount,b.currency,b.period_start,b.period_end,b.captured_at,b.status FROM (`+mistralHistoryWindowSQL+`) r LEFT JOIN mistral_quota_values q ON q.snapshot_id=r.id LEFT JOIN mistral_billing b ON b.snapshot_id=r.id ORDER BY r.id, q.quota_name`,
-		start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano), max(1, min(limit, 200)))
+		start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), max(1, min(limit, 200)))
 	if e != nil {
 		return nil, e
 	}
@@ -331,7 +331,7 @@ func (s *Store) MistralCycleOverview(ctx context.Context, name string) ([]CycleO
 		}
 		var id int64
 		var at string
-		e = s.db.QueryRowContext(ctx, `SELECT s.id,s.captured_at FROM mistral_snapshots s JOIN mistral_quota_values q ON q.snapshot_id=s.id WHERE s.identity=`+mistralActiveIdentity+` AND q.quota_name=? AND s.captured_at>=? AND s.captured_at<? ORDER BY q.utilization DESC LIMIT 1`, name, c.CycleStart.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano)).Scan(&id, &at)
+		e = s.db.QueryRowContext(ctx, `SELECT s.id,s.captured_at FROM mistral_snapshots s JOIN mistral_quota_values q ON q.snapshot_id=s.id WHERE s.identity=`+mistralActiveIdentity+` AND q.quota_name=? AND s.captured_at>=? AND s.captured_at<? ORDER BY q.utilization DESC LIMIT 1`, name, c.CycleStart.Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano)).Scan(&id, &at)
 		if e == sql.ErrNoRows {
 			result = append(result, row)
 			continue

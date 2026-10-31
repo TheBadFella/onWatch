@@ -432,6 +432,7 @@ func (a *CodexAgent) maybeFetchResetCredits(ctx context.Context, snapshot *api.C
 		a.logger.Warn("Failed to record Codex reset-credit check", "error", err, "account_id", a.accountID)
 	}
 
+	a.notifyNewResetCredits(ctx, now)
 	a.notifyExpiringResetCredits(ctx, parsed, now)
 }
 
@@ -1334,5 +1335,88 @@ func (a *CodexAgent) poll(ctx context.Context) {
 
 	for _, q := range snapshot.Quotas {
 		a.logger.Info("Codex poll complete", "quota", q.Name, "utilization", q.Utilization, "plan", resp.PlanType, "account_id", a.accountID)
+	}
+}
+
+// notifyNewResetCredits announces reset credits that became available after the
+// account's baseline fetch. The baseline is established on the first successful
+// detail fetch (even when it returned no credits), so enabling this feature does
+// not replay existing grants. Detection is per credit ID, not per count, so a
+// new credit with an unchanged total is still found. Claims are atomic and
+// released when no channel accepted the batch, which retries a failed delivery
+// on a later fetch; this is at-most-once per claim, not guaranteed exactly-once
+// external delivery.
+func (a *CodexAgent) notifyNewResetCredits(ctx context.Context, now time.Time) {
+	if a.store == nil {
+		return
+	}
+	established, err := a.store.EstablishCodexResetCreditGrantBaseline(a.accountID, now)
+	if err != nil {
+		a.logger.Warn("Failed to establish Codex reset-credit grant baseline", "error", err, "account_id", a.accountID)
+		return
+	}
+	if established {
+		return // the first fetch is the baseline; never alert on it
+	}
+	if a.notifier == nil {
+		return
+	}
+
+	pending, err := a.store.QueryCodexResetCreditsNeedingGrantNotice(a.accountID, now)
+	if err != nil {
+		a.logger.Warn("Failed to query Codex reset credits needing a grant notice", "error", err, "account_id", a.accountID)
+		return
+	}
+	if len(pending) == 0 {
+		return
+	}
+	type claimedCredit struct {
+		row store.CodexResetCreditRecord
+		at  time.Time
+	}
+	claimed := make([]claimedCredit, 0, len(pending))
+	for _, row := range pending {
+		if ctx.Err() != nil {
+			break
+		}
+		claimedAt := time.Now().UTC()
+		ok, err := a.store.ClaimCodexResetCreditGrantNotice(a.accountID, row.CreditID, claimedAt)
+		if err != nil {
+			a.logger.Warn("Failed to claim Codex reset-credit grant notice", "error", err, "account_id", a.accountID)
+			continue
+		}
+		if !ok {
+			continue // another poller or a previous run claimed it
+		}
+		claimed = append(claimed, claimedCredit{row: row, at: claimedAt})
+	}
+	if len(claimed) == 0 {
+		return
+	}
+
+	credits := make([]notify.ResetCreditGrant, 0, len(claimed))
+	for _, c := range claimed {
+		credits = append(credits, notify.ResetCreditGrant{
+			CreditID:      c.row.CreditID,
+			Title:         c.row.Title,
+			GrantedAt:     c.row.GrantedAt,
+			ExpiresAt:     c.row.ExpiresAt,
+			ExpiryUnknown: c.row.ExpiryUnknown,
+		})
+	}
+	sent := a.notifier.SendResetCreditGrantNotification(notify.ResetCreditGrantAlert{
+		AccountID:   fmt.Sprintf("%d", a.accountID),
+		AccountName: a.resetCreditsAccountName(),
+		Credits:     credits,
+	})
+	if sent {
+		a.logger.Info("Sent Codex reset-credit grant notification",
+			"credits", len(credits), "account_id", a.accountID)
+		return
+	}
+	for _, c := range claimed {
+		if err := a.store.ReleaseCodexResetCreditGrantNotice(a.accountID, c.row.CreditID, c.at); err != nil {
+			a.logger.Debug("Failed to release Codex reset-credit grant claim", "error", err)
+		}
 	}
 }

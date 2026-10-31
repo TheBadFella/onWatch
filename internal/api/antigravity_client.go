@@ -44,9 +44,10 @@ type AntigravityConnection struct {
 
 // AntigravityClient is a client for the Antigravity local language server API.
 type AntigravityClient struct {
-	httpClient *http.Client
-	connection *AntigravityConnection
-	logger     *slog.Logger
+	httpClient           *http.Client
+	connection           *AntigravityConnection
+	configuredConnection *AntigravityConnection
+	logger               *slog.Logger
 	// runCommand runs a discovery tool (ps, lsof, ss, netstat, PowerShell,
 	// WMIC) and returns its stdout. Tests swap it to feed canned output on
 	// any host OS.
@@ -61,10 +62,11 @@ func runExternalCommand(ctx context.Context, name string, args ...string) ([]byt
 // AntigravityOption configures an AntigravityClient.
 type AntigravityOption func(*AntigravityClient)
 
-// WithAntigravityConnection sets a pre-configured connection (for testing).
+// WithAntigravityConnection pins an explicit endpoint across failed requests.
 func WithAntigravityConnection(conn *AntigravityConnection) AntigravityOption {
 	return func(c *AntigravityClient) {
 		c.connection = conn
+		c.configuredConnection = conn
 	}
 }
 
@@ -104,6 +106,9 @@ func NewAntigravityClient(logger *slog.Logger, opts ...AntigravityOption) *Antig
 
 // Detect finds and verifies connection to the Antigravity language server.
 func (c *AntigravityClient) Detect(ctx context.Context) (*AntigravityConnection, error) {
+	if c.configuredConnection != nil {
+		c.connection = c.configuredConnection
+	}
 	if c.connection != nil {
 		return c.connection, nil
 	}

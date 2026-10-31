@@ -78,6 +78,7 @@ type WebhookEvents struct {
 	StarterSuccess    bool `json:"starter_success"`
 	StarterFailure    bool `json:"starter_failure"`
 	ResetCreditExpiry bool `json:"reset_credit_expiry"`
+	ResetCreditGrant  bool `json:"reset_credit_grant"`
 }
 
 // Enabled reports whether the named event should be delivered.
@@ -101,6 +102,8 @@ func (e WebhookEvents) Enabled(event string) bool {
 		return e.StarterFailure
 	case EventResetCreditExpiry:
 		return e.ResetCreditExpiry
+	case EventResetCreditGrant:
+		return e.ResetCreditGrant
 	default:
 		return false
 	}
@@ -117,6 +120,7 @@ const (
 	EventStarterSuccess    = "starter_success"
 	EventStarterFailure    = "starter_failure"
 	EventResetCreditExpiry = "reset_credit_expiry"
+	EventResetCreditGrant  = "reset_credit_grant"
 	EventTest              = "test"
 )
 

@@ -517,9 +517,29 @@ func (h *Handler) buildMenubarProviders(settings *menubar.Settings, includeHidde
 		}
 	}
 	if h.config != nil && h.config.HasProvider("antigravity") && h.providerDashboardVisible("antigravity", visibility) {
-		attempted["antigravity"] = struct{}{}
-		payload, readOK, hasData := h.buildAntigravityCurrentOK()
-		add(h.menubarResolveCard("antigravity", resolveProviderTabLabel("antigravity", labels), "", payload, readOK, hasData, normalized.WarningPercent, normalized.CriticalPercent, nil))
+		antigravityAccounts, enumerated := h.antigravityUsageAccountsOK()
+		if enumerated {
+			multiAntigravity := len(antigravityAccounts) > 1
+			for _, account := range antigravityAccounts {
+				usage := account.Usage
+				accountID := minimaxUsageAccountID(usage)
+				providerKey := fmt.Sprintf("antigravity:%d", accountID)
+				if !providerDashboardVisibleForKey(visibility, providerKey, "antigravity") {
+					continue
+				}
+				attempted[providerKey] = struct{}{}
+				name := stringValue(usage, "accountName")
+				if name == "" {
+					name = "default"
+				}
+				label := menubarAccountLabel("antigravity", labels, name, multiAntigravity)
+				add(h.menubarResolveCard(providerKey, label, "Antigravity account", usage, account.ReadOK, account.HasData, normalized.WarningPercent, normalized.CriticalPercent, nil))
+			}
+		} else {
+			for _, entry := range h.menubarCachedAccountCards("antigravity", attempted, visibility) {
+				add(entry.card, entry.captured)
+			}
+		}
 	}
 	if h.config != nil && h.config.HasProvider("minimax") && h.providerDashboardVisible("minimax", visibility) {
 		minimaxAccounts, enumerated := h.minimaxUsageAccountsOK()

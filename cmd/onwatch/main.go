@@ -1422,10 +1422,26 @@ func run() error {
 		}
 	}
 
-	// Create Antigravity tracker
-	var antigravityTr *tracker.AntigravityTracker
+	// Create the Antigravity multi-account agent manager. The legacy default
+	// account uses the client built above; other accounts need an explicit
+	// bridge endpoint in their provider_accounts metadata.
+	var antigravityMgr *agent.AntigravityAgentManager
 	if cfg.HasProvider("antigravity") {
-		antigravityTr = tracker.NewAntigravityTracker(db, logger)
+		antigravityMgr = agent.NewAntigravityAgentManager(db, cfg.PollInterval, idleTimeout, logger)
+		antigravityMgr.SetLegacyClient(antigravityClient, func() string {
+			v, err := db.GetSetting("provider_settings")
+			if err == nil && v != "" {
+				var ps map[string]map[string]interface{}
+				if json.Unmarshal([]byte(v), &ps) == nil {
+					if entry, ok := ps["antigravity"]; ok {
+						if src, ok := entry["source"].(string); ok && src != "" {
+							return src
+						}
+					}
+				}
+			}
+			return cfg.AntigravitySource
+		})
 	}
 
 	var minimaxTr *tracker.MiniMaxTracker
@@ -1482,12 +1498,6 @@ func run() error {
 	var commandCodeTr *tracker.CommandCodeTracker
 	if cfg.HasProvider("commandcode") {
 		commandCodeTr = tracker.NewCommandCodeTracker(db, logger)
-	}
-
-	var antigravityAg *agent.AntigravityAgent
-	if antigravityClient != nil {
-		antigravitySm := agent.NewSessionManager(db, "antigravity", idleTimeout, logger)
-		antigravityAg = agent.NewAntigravityAgent(antigravityClient, db, antigravityTr, cfg.PollInterval, logger, antigravitySm)
 	}
 
 	// Create MiniMax agent manager for multi-account support.
@@ -1613,8 +1623,8 @@ func run() error {
 	if codexMgr != nil {
 		codexMgr.SetNotifier(notifier)
 	}
-	if antigravityAg != nil {
-		antigravityAg.SetNotifier(notifier)
+	if antigravityMgr != nil {
+		antigravityMgr.SetNotifier(notifier)
 	}
 	if minimaxMgr != nil {
 		minimaxMgr.SetNotifier(notifier)
@@ -1740,24 +1750,8 @@ func run() error {
 			return fallback
 		})
 	}
-	if antigravityAg != nil {
-		antigravityAg.SetPollingCheck(func() bool { return isPollingEnabled("antigravity") })
-		// Source preference is read fresh each poll so a settings-UI change
-		// (ide/cli/both) takes effect without a daemon restart.
-		antigravityAg.SetSourceCheck(func() string {
-			v, err := db.GetSetting("provider_settings")
-			if err == nil && v != "" {
-				var ps map[string]map[string]interface{}
-				if json.Unmarshal([]byte(v), &ps) == nil {
-					if ag, ok := ps["antigravity"]; ok {
-						if src, ok := ag["source"].(string); ok && src != "" {
-							return src
-						}
-					}
-				}
-			}
-			return cfg.AntigravitySource
-		})
+	if antigravityMgr != nil {
+		antigravityMgr.SetPollingCheck(func() bool { return isPollingEnabled("antigravity") })
 	}
 	if minimaxMgr != nil {
 		minimaxMgr.SetPollingCheck(func() bool { return isPollingEnabled("minimax") })
@@ -1843,11 +1837,7 @@ func run() error {
 			notifier.CheckCodexReset(accountID, quotaName)
 		})
 	}
-	if antigravityTr != nil {
-		antigravityTr.SetOnReset(func(modelID string) {
-			notifier.Check(notify.QuotaStatus{Provider: "antigravity", QuotaKey: modelID, ResetOccurred: true})
-		})
-	}
+
 	if minimaxTr != nil {
 		minimaxTr.SetOnReset(func(modelName string) {
 			notifier.Check(notify.QuotaStatus{Provider: "minimax", QuotaKey: modelName, ResetOccurred: true})
@@ -1928,8 +1918,8 @@ func run() error {
 	if codexTr != nil {
 		handler.SetCodexTracker(codexTr)
 	}
-	if antigravityTr != nil {
-		handler.SetAntigravityTracker(antigravityTr)
+	if antigravityMgr != nil {
+		handler.SetAntigravityAgentManager(antigravityMgr)
 	}
 	if minimaxTr != nil {
 		handler.SetMiniMaxTracker(minimaxTr)
@@ -1983,8 +1973,8 @@ func run() error {
 	if codexMgr != nil {
 		agentMgr.RegisterFactory("codex", func() (agent.AgentRunner, error) { return codexMgr, nil })
 	}
-	if antigravityAg != nil {
-		agentMgr.RegisterFactory("antigravity", func() (agent.AgentRunner, error) { return antigravityAg, nil })
+	if antigravityMgr != nil {
+		agentMgr.RegisterFactory("antigravity", func() (agent.AgentRunner, error) { return antigravityMgr, nil })
 	}
 	if minimaxMgr != nil {
 		agentMgr.RegisterFactory("minimax", func() (agent.AgentRunner, error) { return minimaxMgr, nil })

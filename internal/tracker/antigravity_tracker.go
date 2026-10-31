@@ -12,6 +12,7 @@ import (
 // AntigravityTracker manages reset cycle detection and usage calculation for Antigravity models.
 type AntigravityTracker struct {
 	store          *store.Store
+	accountID      int64 // provider_accounts.id; 0 resolves to the default account
 	logger         *slog.Logger
 	lastFractions  map[string]float64   // model_id -> last remaining fraction
 	lastResetTimes map[string]time.Time // model_id -> last reset time
@@ -56,6 +57,14 @@ func NewAntigravityTracker(store *store.Store, logger *slog.Logger) *Antigravity
 	}
 }
 
+// NewAntigravityTrackerForAccount creates a tracker scoped to one provider
+// account. Each account keeps its own cycles and in-memory reset detection.
+func NewAntigravityTrackerForAccount(store *store.Store, logger *slog.Logger, accountID int64) *AntigravityTracker {
+	t := NewAntigravityTracker(store, logger)
+	t.accountID = accountID
+	return t
+}
+
 // Process iterates over all models in the snapshot, detects resets, and updates cycles.
 func (t *AntigravityTracker) Process(snapshot *api.AntigravitySnapshot) error {
 	for _, model := range snapshot.Models {
@@ -78,18 +87,18 @@ func (t *AntigravityTracker) processModel(model api.AntigravityModelQuota, captu
 	// Current usage (1.0 - remainingFraction)
 	currentUsage := 1.0 - model.RemainingFraction
 
-	cycle, err := t.store.QueryActiveAntigravityCycle(modelID)
+	cycle, err := t.store.QueryActiveAntigravityCycle(modelID, t.accountID)
 	if err != nil {
 		return fmt.Errorf("failed to query active cycle: %w", err)
 	}
 
 	if cycle == nil {
 		// First snapshot for this model - create new cycle
-		_, err := t.store.CreateAntigravityCycle(modelID, capturedAt, model.ResetTime)
+		_, err := t.store.CreateAntigravityCycle(modelID, capturedAt, model.ResetTime, t.accountID)
 		if err != nil {
 			return fmt.Errorf("failed to create cycle: %w", err)
 		}
-		if err := t.store.UpdateAntigravityCycle(modelID, currentUsage, 0); err != nil {
+		if err := t.store.UpdateAntigravityCycle(modelID, currentUsage, 0, t.accountID); err != nil {
 			return fmt.Errorf("failed to set initial peak: %w", err)
 		}
 		t.lastFractions[modelID] = model.RemainingFraction
@@ -151,15 +160,15 @@ func (t *AntigravityTracker) processModel(model api.AntigravityModelQuota, captu
 			cycleEndTime = *cycle.ResetTime
 		}
 
-		if err := t.store.CloseAntigravityCycle(modelID, cycleEndTime, cycle.PeakUsage, cycle.TotalDelta); err != nil {
+		if err := t.store.CloseAntigravityCycle(modelID, cycleEndTime, cycle.PeakUsage, cycle.TotalDelta, t.accountID); err != nil {
 			return fmt.Errorf("failed to close cycle: %w", err)
 		}
 
 		// Create new cycle
-		if _, err := t.store.CreateAntigravityCycle(modelID, capturedAt, model.ResetTime); err != nil {
+		if _, err := t.store.CreateAntigravityCycle(modelID, capturedAt, model.ResetTime, t.accountID); err != nil {
 			return fmt.Errorf("failed to create new cycle: %w", err)
 		}
-		if err := t.store.UpdateAntigravityCycle(modelID, currentUsage, 0); err != nil {
+		if err := t.store.UpdateAntigravityCycle(modelID, currentUsage, 0, t.accountID); err != nil {
 			return fmt.Errorf("failed to set initial peak: %w", err)
 		}
 
@@ -190,13 +199,13 @@ func (t *AntigravityTracker) processModel(model api.AntigravityModelQuota, captu
 			if currentUsage > cycle.PeakUsage {
 				cycle.PeakUsage = currentUsage
 			}
-			if err := t.store.UpdateAntigravityCycle(modelID, cycle.PeakUsage, cycle.TotalDelta); err != nil {
+			if err := t.store.UpdateAntigravityCycle(modelID, cycle.PeakUsage, cycle.TotalDelta, t.accountID); err != nil {
 				return fmt.Errorf("failed to update cycle: %w", err)
 			}
 		} else {
 			if currentUsage > cycle.PeakUsage {
 				cycle.PeakUsage = currentUsage
-				if err := t.store.UpdateAntigravityCycle(modelID, cycle.PeakUsage, cycle.TotalDelta); err != nil {
+				if err := t.store.UpdateAntigravityCycle(modelID, cycle.PeakUsage, cycle.TotalDelta, t.accountID); err != nil {
 					return fmt.Errorf("failed to update cycle: %w", err)
 				}
 			}
@@ -204,7 +213,7 @@ func (t *AntigravityTracker) processModel(model api.AntigravityModelQuota, captu
 	} else {
 		if currentUsage > cycle.PeakUsage {
 			cycle.PeakUsage = currentUsage
-			if err := t.store.UpdateAntigravityCycle(modelID, cycle.PeakUsage, cycle.TotalDelta); err != nil {
+			if err := t.store.UpdateAntigravityCycle(modelID, cycle.PeakUsage, cycle.TotalDelta, t.accountID); err != nil {
 				return fmt.Errorf("failed to update cycle: %w", err)
 			}
 		}
@@ -219,12 +228,12 @@ func (t *AntigravityTracker) processModel(model api.AntigravityModelQuota, captu
 
 // UsageSummary returns computed stats for a specific Antigravity model.
 func (t *AntigravityTracker) UsageSummary(modelID string) (*AntigravitySummary, error) {
-	activeCycle, err := t.store.QueryActiveAntigravityCycle(modelID)
+	activeCycle, err := t.store.QueryActiveAntigravityCycle(modelID, t.accountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query active cycle: %w", err)
 	}
 
-	history, err := t.store.QueryAntigravityCycleHistory(modelID)
+	history, err := t.store.QueryAntigravityCycleHistoryForAccount(t.accountID, modelID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query cycle history: %w", err)
 	}
@@ -264,7 +273,7 @@ func (t *AntigravityTracker) UsageSummary(modelID string) (*AntigravitySummary, 
 		}
 
 		// Get latest snapshot for current values
-		latest, err := t.store.QueryLatestAntigravity()
+		latest, err := t.store.QueryLatestAntigravity(t.accountID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query latest: %w", err)
 		}

@@ -32,9 +32,9 @@ No manual configuration is required for local development.
 
 ## Data Sources: IDE vs CLI (agy)
 
-Antigravity ships in more than one form, and **all variants share a single
-Google-account quota**, so onWatch shows one Antigravity card and lets you choose
-where the data comes from:
+Antigravity ships in more than one form, and the local variants share one
+Google-account quota. Each configured account has its own quota; for the local
+account you can choose where the data comes from:
 
 | Source | What it does | Data richness |
 |--------|--------------|---------------|
@@ -64,6 +64,67 @@ onWatch locates `agy` via `ANTIGRAVITY_CLI_PATH`, then your `PATH`, then common
 install locations (`~/.local/bin/agy`, `/opt/homebrew/bin/agy`,
 `/usr/local/bin/agy`). The CLI source is supported on macOS, Linux, and Windows
 (via ConPTY); the Unix path is the most thoroughly validated.
+
+---
+
+## Multiple accounts
+
+onWatch launches one managed `agy` process in the default environment. The
+installed CLI help and current runner expose no verified way to select an
+independent authenticated profile. Running two onWatch
+accounts against the same local server would therefore read the same Google
+account, so onWatch does not invent CLI profile flags or swap shared
+credentials.
+
+The supported way to track more than one Antigravity account is an explicit,
+separately authenticated bridge endpoint per account. Each account stores:
+
+| Field | Meaning |
+|-------|---------|
+| `base_url` | `http(s)://host:port` of that account's Antigravity language server or bridge. |
+| `csrf_token` | The token that endpoint requires in `X-Codeium-Csrf-Token`. |
+| `expected_email` | The account email the endpoint must report. Required for an explicit bridge. |
+
+onWatch calls `GetUserStatus` and compares the returned email with
+`expected_email`. If the email is missing or different, that account's poll
+fails and no snapshot is stored. A failure for one account never stops another
+account's polling. The token is never returned by the API, written to logs, or
+sent to a third party.
+
+### Configure accounts
+
+- Dashboard: **Settings -> Providers -> Antigravity -> Accounts -> + Add
+  Account**. Add, edit connections, delete, and restore accounts there. When editing, leave
+  the token blank to keep its saved value. The local default account
+  can keep using auto-detection and the `ide`/`cli`/`both` source selector.
+- API:
+  - `GET /api/antigravity/accounts`
+  - `POST /api/antigravity/accounts` with `{name, base_url, csrf_token, expected_email}`
+  - `PUT /api/antigravity/accounts?id=N` with the fields to change, or `{restore:true}`
+  - `DELETE /api/antigravity/accounts?id=N`
+  - `GET /api/antigravity/accounts/usage`
+
+`base_url` and `expected_email` are both required when a bridge endpoint is set.
+The account name is a local label.
+
+### Storage and existing installs
+
+Snapshots and reset cycles are stored per account. Existing single-account
+history is migrated to the default account, so an install that never adds a
+second account keeps its current data and settings. The dashboard account
+selector appears when more than one account is configured and scopes current
+usage, history, insights, reset cycles, cycle overview, logging history, and
+sessions to the selected account. The menubar shows one card per account.
+
+### Limitations
+
+- There is no combined "All accounts" view for Antigravity.
+- Prometheus metrics report the default account.
+- onWatch does not log in, refresh, or store Antigravity credentials. Each
+  bridge must already be authenticated and reachable.
+- The source selector applies only to the local default account.
+- Use **Edit connection** to replace the CSRF token when the remote
+  Antigravity server restarts.
 
 ---
 

@@ -465,6 +465,30 @@ Notifications:
 - Detail-endpoint failures never affect usage polling, pause state, or auth
   failure counters.
 
+### New reset credit alerts
+
+onWatch can announce a newly available banked reset credit. The first successful
+detail fetch records a **per-account baseline** and announces nothing for the
+credits that already existed, including an empty baseline. After that, a credit
+ID seen for the first time is announced once, even when the reported total did
+not change: detection is by account plus credit ID, never by count alone.
+
+- Dedupe is stored per credit and survives restarts, account switches, and a
+  credit that disappears and reappears. A merged duplicate account keeps its
+  existing markers and baseline, and suppresses credits older than the baseline.
+- Credits discovered in the same detail fetch are batched into one message.
+  Messages name the account and include only known grant and expiry dates. A
+  credit with an unknown expiry says so; a credit whose known expiry already
+  passed is not announced.
+- Preference: **Settings -> Notifications -> New reset credit alerts**. It is on
+  by default. Email, push, and webhook delivery follow the configured channels;
+  the event is `reset_credit_grant`. If you saved individual email or webhook
+  event selections previously, also enable **New reset credits** in that
+  channel's event list.
+- Delivery is at-most-once per claim. If no channel accepts the message, the
+  claim is released and a later detail fetch retries. This is not a guarantee of
+  exactly-once external delivery across a crash.
+
 ---
 
 ## See Also

@@ -96,7 +96,7 @@ func TestStore_AntigravityActiveCycleUniqueIndexExists(t *testing.T) {
 		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
 			t.Fatalf("failed to scan index row: %v", err)
 		}
-		if name == "idx_antigravity_cycles_model_active_unique" {
+		if name == "idx_antigravity_cycles_account_model_active_unique" {
 			found = true
 			if unique != 1 {
 				t.Fatalf("expected index %s to be unique", name)
@@ -110,7 +110,7 @@ func TestStore_AntigravityActiveCycleUniqueIndexExists(t *testing.T) {
 		t.Fatalf("index list iteration failed: %v", err)
 	}
 	if !found {
-		t.Fatal("expected idx_antigravity_cycles_model_active_unique index to exist")
+		t.Fatal("expected idx_antigravity_cycles_account_model_active_unique index to exist")
 	}
 }
 

@@ -318,3 +318,30 @@ func TestScoreWindowsCandidate(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravityClient_ExplicitEndpointSurvivesFailure(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"userStatus":{"email":"work@example.com"}}`))
+	}))
+	defer server.Close()
+	client := NewAntigravityClient(slog.Default(), WithAntigravityConnection(&AntigravityConnection{BaseURL: server.URL}))
+	client.runCommand = func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("explicit endpoint fell back to process discovery")
+		return nil, nil
+	}
+	if _, err := client.FetchQuotas(context.Background()); err == nil {
+		t.Fatal("expected first request failure")
+	}
+	if _, err := client.FetchQuotas(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("requests = %d", calls)
+	}
+}
