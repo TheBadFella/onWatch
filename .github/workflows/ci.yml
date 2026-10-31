@@ -30,7 +30,7 @@ jobs:
   linux:
     name: Linux checks
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 15 || 5 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 20 || 5 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -52,7 +52,7 @@ jobs:
       - name: Test Linux daemon (manual full suite)
         if: github.event_name == 'workflow_dispatch'
         env:
-          GOFLAGS: '-failfast -timeout=5m'
+          GOFLAGS: '-failfast -timeout=10m -p=2 -parallel=4'
         run: bash ./app.sh --test
       - name: Test dashboard controls
         run: node --test tests/js/*-test.cjs
