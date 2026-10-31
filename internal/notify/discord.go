@@ -48,7 +48,7 @@ func discordColorForEvent(event string) int {
 		return 0xef4444 // Red
 	case EventWarning, EventResetSoon, EventResetCreditExpiry:
 		return 0xf59e0b // Amber / Yellow
-	case EventReset, EventStarterSuccess:
+	case EventReset, EventStarterSuccess, EventResetCreditGrant:
 		return 0x10b981 // Green
 	case EventAuthError:
 		return 0xd97706 // Deep Orange
@@ -134,6 +134,9 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	}
 	if payload.Event == EventResetCreditExpiry {
 		title = "⌛ " + context + " | Banked reset expires soon"
+	}
+	if payload.Event == EventResetCreditGrant {
+		title = "✦ " + context + " | New banked reset credit"
 	}
 	if payload.Reset == nil && payload.ResetAt != "" {
 		if t, err := time.Parse(time.RFC3339, payload.ResetAt); err == nil {

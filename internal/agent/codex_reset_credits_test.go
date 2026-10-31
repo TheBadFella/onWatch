@@ -462,3 +462,112 @@ func newResetCreditNotifier(t *testing.T, st *store.Store, webhookURL string) *n
 	}
 	return engine
 }
+
+// The first successful detail fetch is a baseline. A later credit with a new ID
+// is detected on the next detail refresh even when the reported total is
+// unchanged.
+func TestCodexAgent_ResetCreditGrant_BaselineThenNewIDUnchangedCount(t *testing.T) {
+	cs := newCodexResetCreditsServer(t)
+	cs.usageCount.Store(2)
+	cs.detailPayload.Store(`{"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"}],"available_count":2}`)
+	ag, st := cs.agent(t, time.Minute)
+
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	ag.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	ag.poll(ctx)
+	baseline, err := st.QueryCodexResetCreditGrantBaseline(store.DefaultCodexAccountID)
+	if err != nil {
+		t.Fatalf("Query baseline: %v", err)
+	}
+	if baseline == nil {
+		t.Fatal("baseline not established on the first successful fetch")
+	}
+	pending, err := st.QueryCodexResetCreditsNeedingGrantNotice(store.DefaultCodexAccountID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("Query pending: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending after baseline = %d, want 0", len(pending))
+	}
+
+	// A new ID replaces one of the two rows, so the reported total stays 2.
+	cs.detailPayload.Store(`{"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"},{"id":"credit-2","reset_type":"codex_rate_limits","status":"available"}],"available_count":2}`)
+	now = now.Add(31 * time.Minute)
+	ag.poll(ctx)
+
+	pending, err = st.QueryCodexResetCreditsNeedingGrantNotice(store.DefaultCodexAccountID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("Query pending second: %v", err)
+	}
+	if len(pending) != 1 || pending[0].CreditID != "credit-2" {
+		t.Fatalf("pending = %#v, want only credit-2", pending)
+	}
+}
+
+// A restart over the same database does not re-baseline and does not re-announce
+// a credit that was already claimed.
+func TestCodexAgent_ResetCreditGrant_RestartDoesNotReplay(t *testing.T) {
+	cs := newCodexResetCreditsServer(t)
+	cs.usageCount.Store(1)
+	cs.detailPayload.Store(`{"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"}],"available_count":1}`)
+	ag, st := cs.agent(t, time.Minute)
+
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	ag.now = func() time.Time { return now }
+	ag.poll(context.Background())
+
+	// Claim the existing credit as a previous run would have after announcing it.
+	claimedAt := now.Add(time.Minute)
+	if _, err := st.ClaimCodexResetCreditGrantNotice(store.DefaultCodexAccountID, "credit-1", claimedAt); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	// Restart: a fresh agent over the same store, same detail payload.
+	restarted := cs.agentWithStore(t, st, time.Minute)
+	restarted.now = func() time.Time { return now.Add(2 * time.Minute) }
+	restarted.poll(context.Background())
+
+	baseline, err := st.QueryCodexResetCreditGrantBaseline(store.DefaultCodexAccountID)
+	if err != nil {
+		t.Fatalf("Query baseline: %v", err)
+	}
+	if baseline == nil || !baseline.BaselineAt.Equal(now) {
+		t.Fatalf("baseline = %#v, want the original %v (a restart must not re-baseline)", baseline, now)
+	}
+	pending, err := st.QueryCodexResetCreditsNeedingGrantNotice(store.DefaultCodexAccountID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("Query pending: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending after restart = %d, want 0", len(pending))
+	}
+}
+
+// When no channel accepts the grant message, the claim is released so a later
+// detail fetch retries instead of silently dropping the credit.
+func TestCodexAgent_ResetCreditGrant_FailedDeliveryRetries(t *testing.T) {
+	cs := newCodexResetCreditsServer(t)
+	cs.usageCount.Store(1)
+	cs.detailPayload.Store(`{"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"}],"available_count":1}`)
+	ag, st := cs.agent(t, time.Minute)
+	ag.SetNotifier(notify.New(st, slog.Default())) // no configured channels
+
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	ag.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	ag.poll(ctx) // establishes the baseline
+	cs.detailPayload.Store(`{"credits":[{"id":"credit-1","reset_type":"codex_rate_limits","status":"available"},{"id":"credit-2","reset_type":"codex_rate_limits","status":"available"}],"available_count":1}`)
+	now = now.Add(31 * time.Minute)
+	ag.poll(ctx) // detects credit-2 but cannot deliver
+
+	pending, err := st.QueryCodexResetCreditsNeedingGrantNotice(store.DefaultCodexAccountID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("Query pending: %v", err)
+	}
+	if len(pending) != 1 || pending[0].CreditID != "credit-2" {
+		t.Fatalf("pending = %#v, want credit-2 to remain retryable", pending)
+	}
+}

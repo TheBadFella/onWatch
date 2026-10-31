@@ -97,6 +97,8 @@ function providerParam() {
     param += codexAccountParam();
   } else if (provider === 'minimax') {
     param += minimaxAccountParam();
+  } else if (provider === 'antigravity') {
+    param += antigravityAccountParam();
   }
   return param;
 }
@@ -647,6 +649,117 @@ function initMiniMaxAccountTabs() {
 function minimaxAccountParam() {
   if (!State.minimaxAccount || State.minimaxAccount === 'all') return '';
   return `&account=${encodeURIComponent(State.minimaxAccount)}`;
+}
+
+// ── Antigravity Account Persistence (multi-account) ──
+// Antigravity has no verified CLI profile isolation, so each account is a
+// separately authenticated bridge endpoint. Selection is per browser.
+
+function loadAntigravityAccount() {
+  try {
+    const stored = localStorage.getItem('onwatch-antigravity-account');
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      State.antigravityAccount = isNaN(parsed) ? null : parsed;
+    }
+  } catch (e) {
+    State.antigravityAccount = null;
+  }
+}
+
+function saveAntigravityAccount(account) {
+  State.antigravityAccount = account;
+  try {
+    localStorage.setItem('onwatch-antigravity-account', account);
+  } catch (e) {
+    // silent
+  }
+}
+
+async function loadAntigravityAccounts() {
+  try {
+    const res = await authFetch(`${API_BASE}/api/antigravity/accounts`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const activeAccounts = (data.accounts || []).filter(a => !a.deletedAt);
+    State.antigravityAccounts = activeAccounts;
+    if (!activeAccounts.length) State.antigravityAccount = null;
+    if (activeAccounts.length > 0) {
+      const stored = State.antigravityAccount;
+      if (!stored || !activeAccounts.find(a => a.id === stored)) {
+        State.antigravityAccount = activeAccounts[0].id;
+        saveAntigravityAccount(State.antigravityAccount);
+      }
+    }
+    populateAntigravityAccountMenu();
+    updateAntigravityAccountVisibility();
+  } catch (e) {
+    // silent
+  }
+}
+
+function antigravityAccountParam() {
+  if (!State.antigravityAccount) return '';
+  return `&account=${encodeURIComponent(State.antigravityAccount)}`;
+}
+
+function populateAntigravityAccountMenu() {
+  const dropdown = document.getElementById('antigravity-profile-dropdown');
+  const menu = document.getElementById('antigravity-profile-menu');
+  if (!dropdown || !menu) return;
+
+  if (!State.antigravityAccounts || State.antigravityAccounts.length <= 1) {
+    dropdown.style.display = 'none';
+    return;
+  }
+
+  menu.innerHTML = '';
+  for (const account of State.antigravityAccounts) {
+    const li = document.createElement('li');
+    li.className = 'codex-profile-item' + (account.id === State.antigravityAccount ? ' active' : '');
+    li.dataset.accountId = account.id;
+    li.textContent = account.name;
+    li.setAttribute('role', 'option');
+    li.tabIndex = -1;
+    li.setAttribute('aria-selected', account.id === State.antigravityAccount ? 'true' : 'false');
+    li.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); li.click(); }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const next = e.key === 'ArrowDown' ? li.nextElementSibling : li.previousElementSibling;
+        if (next) next.focus();
+      }
+    });
+    li.addEventListener('click', () => {
+      switchAntigravityAccount(account.id);
+      closeAntigravityAccountDropdown();
+    });
+    menu.appendChild(li);
+  }
+  updateAntigravityAccountActive();
+}
+
+function switchAntigravityAccount(accountId) {
+  if (State.antigravityAccount === accountId) return;
+  saveAntigravityAccount(accountId);
+  updateAntigravityAccountActive();
+  updateAntigravityAccountVisibility();
+  refreshAll();
+}
+
+function updateAntigravityAccountActive() {
+  const label = document.getElementById('antigravity-profile-label');
+  const menu = document.getElementById('antigravity-profile-menu');
+  if (!menu) return;
+  if (label) {
+    const active = (State.antigravityAccounts || []).find(a => a.id === State.antigravityAccount);
+    label.textContent = active ? active.name : 'Default account';
+  }
+  menu.querySelectorAll('.codex-profile-item').forEach(item => {
+    const isActive = parseInt(item.dataset.accountId, 10) === State.antigravityAccount;
+    item.classList.toggle('active', isActive);
+    item.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
 }
 
 // ── Insight Visibility (DB-persisted) ──
@@ -2650,7 +2763,7 @@ async function loadAntigravityModalChart(groupKey) {
   const timeUnit = ['7d', '30d', '15d'].includes(rangeKey) ? 'day' : 'hour';
   const colors = getThemeColors();
   try {
-    const res = await authFetch(`${API_BASE}/api/history?range=${range}&provider=antigravity`);
+    const res = await authFetch(`${API_BASE}/api/history?range=${range}&provider=antigravity${antigravityAccountParam()}`);
     if (!res.ok) return;
     const data = await res.json();
 
@@ -2700,7 +2813,7 @@ async function loadAntigravityModalChart(groupKey) {
 
 async function loadAntigravityModalCycles(groupKey) {
   try {
-    const res = await authFetch(`${API_BASE}/api/cycle-overview?groupBy=${groupKey}&provider=antigravity`);
+    const res = await authFetch(`${API_BASE}/api/cycle-overview?groupBy=${groupKey}&provider=antigravity${antigravityAccountParam()}`);
     if (!res.ok) return;
     const data = await res.json();
     const tbody = document.getElementById('modal-cycles-tbody');
@@ -4715,7 +4828,7 @@ function updateCommandCodeCard(quota) {
 
 async function fetchCurrent(onlyIfChanged = false) {
   const requestProvider = getCurrentProvider();
-  const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
+  const requestAccount = chartAccountKey(requestProvider);
   const requestSeq = (State.currentRequestSeq || 0) + 1;
   State.currentRequestSeq = requestSeq;
 
@@ -4774,7 +4887,7 @@ async function fetchCurrent(onlyIfChanged = false) {
     requestAnimationFrame(() => {
       if (State.currentRequestSeq !== requestSeq) return;
       if (getCurrentProvider() !== requestProvider) return;
-      if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
+      if (chartAccountKey(requestProvider) !== requestAccount) return;
 
       document.getElementById('status-dot')?.classList.remove('stale');
       if (!shouldRenderLiveData(`${requestProvider}:${requestAccount}`, {data, apiIntegrationsCurrentData, apiIntegrationsHealthData}, !onlyIfChanged)) return;
@@ -5451,7 +5564,7 @@ async function fetchDeepInsights() {
   // Per-account insights don't apply to the aggregate all-accounts overview.
   if (isAccountsOverviewMode(provider)) return;
   const requestProvider = provider;
-  const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
+  const requestAccount = chartAccountKey(requestProvider);
   const requestRange = State.insightsRange;
   const requestSeq = (State.insightsRequestSeq || 0) + 1;
   State.insightsRequestSeq = requestSeq;
@@ -5472,7 +5585,7 @@ async function fetchDeepInsights() {
 
     if (State.insightsRequestSeq !== requestSeq) return;
     if (getCurrentProvider() !== requestProvider) return;
-    if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
+    if (chartAccountKey(requestProvider) !== requestAccount) return;
     if (State.insightsRange !== requestRange) return;
 
     if (requestProvider === 'both') {
@@ -6199,6 +6312,7 @@ function warnHistoryFailure(provider, range, reason, status) {
 function chartAccountKey(provider) {
   if (provider === 'codex') return State.codexAccount == null ? null : State.codexAccount;
   if (provider === 'minimax') return State.minimaxAccount == null ? null : State.minimaxAccount;
+  if (provider === 'antigravity') return State.antigravityAccount == null ? null : State.antigravityAccount;
   return null;
 }
 
@@ -6207,7 +6321,8 @@ function chartAccountLabel(provider) {
   if (id == null || id === 'all') return id === 'all' ? 'All accounts' : '';
   const list = provider === 'codex'
     ? (State.codexProfiles || [])
-    : (provider === 'minimax' ? (State.minimaxAccounts || []) : []);
+    : (provider === 'minimax' ? (State.minimaxAccounts || [])
+      : (provider === 'antigravity' ? (State.antigravityAccounts || []) : []));
   const match = list.find(item => String(item.id) === String(id));
   if (match) return match.name || match.accountName || `Account ${id}`;
   return `Account ${id}`;
@@ -6219,7 +6334,8 @@ function chartAccountLabelFor(provider, account) {
   if (account == null || account === 'all') return account === 'all' ? 'All accounts' : '';
   const list = provider === 'codex'
     ? (State.codexProfiles || [])
-    : (provider === 'minimax' ? (State.minimaxAccounts || []) : []);
+    : (provider === 'minimax' ? (State.minimaxAccounts || [])
+      : (provider === 'antigravity' ? (State.antigravityAccounts || []) : []));
   const match = list.find(item => String(item.id) === String(account));
   if (match) return match.name || match.accountName || `Account ${account}`;
   return `Account ${account}`;
@@ -6277,7 +6393,7 @@ function recordChartRendered(provider, range) {
 function historyRequestIsCurrent(provider, account, range, seq) {
   if (State.historyRequestSeq !== seq) return false;
   if (getCurrentProvider() !== provider) return false;
-  if (provider === 'codex' && State.codexAccount !== account) return false;
+  if (chartAccountKey(provider) !== account) return false;
   if (State.currentRange !== range) return false;
   return true;
 }
@@ -6377,7 +6493,7 @@ async function fetchHistory(range) {
   }
   State.currentRange = range;
   const requestProvider = getCurrentProvider();
-  const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
+  const requestAccount = chartAccountKey(requestProvider);
   const requestRange = range;
   const requestSeq = (State.historyRequestSeq || 0) + 1;
   State.historyRequestSeq = requestSeq;
@@ -8450,7 +8566,7 @@ function updateTimeScale(chart, range) {
 async function fetchCycles() {
   if (!shouldShowCyclesTable()) return;
   const requestProvider = getCurrentProvider();
-  const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
+  const requestAccount = chartAccountKey(requestProvider);
   const requestRange = State.cyclesRange;
   const requestSeq = (State.cyclesRequestSeq || 0) + 1;
   State.cyclesRequestSeq = requestSeq;
@@ -8506,7 +8622,7 @@ async function fetchCycles() {
     // Calculate limit based on range: 1 minute polling = rangeDays * 24 * 60 records
     // Cap at 50000 for performance (enough for ~35 days of 1-minute data)
     const dynamicLimit = Math.min(50000, rangeDays * 24 * 60);
-    const accountParam = provider === 'codex' ? codexAccountParam() : provider === 'minimax' ? minimaxAccountParam() : '';
+    const accountParam = provider === 'codex' ? codexAccountParam() : provider === 'minimax' ? minimaxAccountParam() : provider === 'antigravity' ? antigravityAccountParam() : '';
     const url = `/api/logging-history?provider=${provider}&limit=${dynamicLimit}&range=${rangeDays}${accountParam}`;
     try {
       const res = await authFetch(url);
@@ -8514,7 +8630,7 @@ async function fetchCycles() {
       const data = await res.json();
       if (State.cyclesRequestSeq !== requestSeq) return;
       if (getCurrentProvider() !== requestProvider) return;
-      if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
+      if (chartAccountKey(requestProvider) !== requestAccount) return;
       if (State.cyclesRange !== requestRange) return;
 
       State.allCyclesData = (data.logs || []).map(log => ({
@@ -8545,7 +8661,7 @@ async function fetchCycles() {
     const data = await res.json();
     if (State.cyclesRequestSeq !== requestSeq) return;
     if (getCurrentProvider() !== requestProvider) return;
-    if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
+    if (chartAccountKey(requestProvider) !== requestAccount) return;
     if (State.cyclesRange !== requestRange) return;
 
     State.allCyclesData = data.cycles || [];
@@ -8912,7 +9028,7 @@ async function fetchSessions() {
     return;
   }
   if (sessionsEl) sessionsEl.hidden = false;
-  const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
+  const requestAccount = chartAccountKey(requestProvider);
   const requestSeq = (State.sessionsRequestSeq || 0) + 1;
   State.sessionsRequestSeq = requestSeq;
 
@@ -8922,7 +9038,7 @@ async function fetchSessions() {
     const data = await res.json();
     if (State.sessionsRequestSeq !== requestSeq) return;
     if (getCurrentProvider() !== requestProvider) return;
-    if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
+    if (chartAccountKey(requestProvider) !== requestAccount) return;
 
     const provider = requestProvider;
 
@@ -9690,7 +9806,7 @@ async function loadModalCycles(quotaType, effectiveProvider) {
     apiType = quotaType === 'toolCalls' ? 'toolcall' : quotaType;
   }
   try {
-    const accountParam = provider === 'codex' ? codexAccountParam() : provider === 'minimax' ? minimaxAccountParam() : '';
+    const accountParam = provider === 'codex' ? codexAccountParam() : provider === 'minimax' ? minimaxAccountParam() : provider === 'antigravity' ? antigravityAccountParam() : '';
     const res = await authFetch(`${API_BASE}/api/cycles?type=${apiType}&provider=${provider}${accountParam}`);
     if (!res.ok) return;
     const cycles = await res.json();
@@ -9951,7 +10067,7 @@ async function fetchCycleOverview() {
   if (!shouldShowOverviewTable()) return;
   const provider = getCurrentProvider();
   const requestProvider = provider;
-  const requestAccount = requestProvider === 'codex' ? State.codexAccount : null;
+  const requestAccount = chartAccountKey(requestProvider);
   const categories = getOverviewCategories();
   if (categories.length === 0) return;
   if (!categories.some(cat => cat.groupBy === State.overviewGroupBy)) {
@@ -10003,7 +10119,7 @@ async function fetchCycleOverview() {
         break;
       }
     }
-    const accountParam = effectiveProvider === 'codex' ? codexAccountParam() : effectiveProvider === 'minimax' ? minimaxAccountParam() : '';
+    const accountParam = effectiveProvider === 'codex' ? codexAccountParam() : effectiveProvider === 'minimax' ? minimaxAccountParam() : effectiveProvider === 'antigravity' ? antigravityAccountParam() : '';
     url = `/api/cycle-overview?provider=${effectiveProvider}&groupBy=${requestGroupBy}&limit=50${accountParam}`;
   } else {
     url = `/api/cycle-overview?${providerParam()}&groupBy=${requestGroupBy}&limit=50`;
@@ -10015,7 +10131,7 @@ async function fetchCycleOverview() {
     const data = await res.json();
     if (State.overviewRequestSeq !== requestSeq) return;
     if (getCurrentProvider() !== requestProvider) return;
-    if (requestProvider === 'codex' && State.codexAccount !== requestAccount) return;
+    if (chartAccountKey(requestProvider) !== requestAccount) return;
     if (State.overviewGroupBy !== requestGroupBy) return;
 
     State.allOverviewData = data.cycles || [];
@@ -10689,9 +10805,9 @@ async function loadSettings() {
     }
 
     const emailEvents = data.smtp?.events;
-    ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'].forEach(event => {
+    ['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'reset_credit_grant', 'exhausted', 'reset_soon'].forEach(event => {
       const input = document.getElementById('smtp-event-' + event.replaceAll('_', '-'));
-      if (input) input.checked = emailEvents ? emailEvents[event] === true : ['warning', 'critical', 'reset', 'auth_error', 'reset_credit_expiry'].includes(event);
+      if (input) input.checked = emailEvents ? emailEvents[event] === true : ['warning', 'critical', 'reset', 'auth_error', 'reset_credit_expiry', 'reset_credit_grant'].includes(event);
     });
 
     // Notifications
@@ -10713,6 +10829,9 @@ async function loadSettings() {
       // Absent means the default (on) for the reset-credit expiry warning.
       const resetCreditCheck = document.getElementById('notify-reset-credit-expiry');
       if (resetCreditCheck) resetCreditCheck.checked = n.notify_reset_credit_expiry !== false;
+      // Same default (on) for the newly granted-credit announcement.
+      const resetGrantCheck = document.getElementById('notify-reset-credit-grant');
+      if (resetGrantCheck) resetGrantCheck.checked = n.notify_reset_credit_grant !== false;
       const repeatCheck = document.getElementById('notify-repeat');
       if (repeatCheck) repeatCheck.checked = !!n.notify_repeat;
       setVal('notify-cooldown', n.cooldown_minutes || 30);
@@ -11942,7 +12061,7 @@ const providerSettingsConfig = {
   },
   antigravity: {
     title: 'Antigravity',
-    desc: 'Choose where quota data comes from. All Antigravity variants share one Google-account quota, so onWatch shows a single card and labels the active source.',
+    desc: 'Choose where quota data comes from. Each Antigravity account has its own quota. The local default uses the source below; additional accounts use a separately authenticated bridge endpoint with a verified email.',
     fields: [
       { id: 'source', label: 'Data Source', type: 'select', options: [
         { value: 'both', text: 'Both (prefer agy CLI, fall back to IDE)' },
@@ -12190,7 +12309,11 @@ async function openProviderSettingsModal(providerKey) {
     const addBtn = document.getElementById('minimax-add-account-btn');
     const addForm = document.getElementById('minimax-add-form');
     if (addBtn && addForm) {
-      addBtn.addEventListener('click', () => { addForm.hidden = false; addBtn.hidden = true; });
+      addBtn.addEventListener('click', () => {
+        delete addForm.dataset.accountId;
+        addForm.querySelectorAll('input').forEach(input => { input.value = ''; });
+        addForm.hidden = false; addBtn.hidden = true;
+      });
       document.getElementById('minimax-cancel-new-btn')?.addEventListener('click', () => { addForm.hidden = true; addBtn.hidden = false; });
       document.getElementById('minimax-save-new-btn')?.addEventListener('click', async () => {
         const name = document.getElementById('minimax-new-name')?.value?.trim();
@@ -12311,6 +12434,131 @@ async function openProviderSettingsModal(providerKey) {
             });
           });
         }
+      } else {
+        accountsList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px">Failed to load accounts</p>';
+      }
+    } catch (e) {
+      accountsList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px">Failed to load accounts</p>';
+    }
+  } else if (providerKey === 'antigravity') {
+    let accountsHTML = '<div class="minimax-modal-accounts">';
+    accountsHTML += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+    accountsHTML += '<h4 style="margin:0;font-size:13px;color:var(--text-secondary)">Accounts</h4>';
+    accountsHTML += '<button id="antigravity-add-account-btn" style="padding:4px 12px;font-size:12px;background:var(--md-primary,#6750a4);color:#fff;border:none;border-radius:4px;cursor:pointer">+ Add Account</button>';
+    accountsHTML += '</div>';
+    accountsHTML += '<div id="antigravity-accounts-list">Loading...</div>';
+    accountsHTML += '<div id="antigravity-add-form" hidden style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-inset)">';
+    accountsHTML += '<div class="settings-fields">';
+    accountsHTML += '<div class="settings-field"><label for="antigravity-new-name">Account Name</label><input type="text" id="antigravity-new-name" class="settings-input" placeholder="e.g. work, personal" /></div>';
+    accountsHTML += '<div class="settings-field"><label for="antigravity-new-url">Bridge Base URL</label><input type="text" id="antigravity-new-url" class="settings-input" placeholder="https://127.0.0.1:42100" /></div>';
+    accountsHTML += '<div class="settings-field"><label for="antigravity-new-token">CSRF Token</label><input type="password" id="antigravity-new-token" class="settings-input" autocomplete="off" /></div>';
+    accountsHTML += '<div class="settings-field"><label for="antigravity-new-email">Expected Account Email</label><input type="text" id="antigravity-new-email" class="settings-input" placeholder="user@example.com" /></div>';
+    accountsHTML += '</div>';
+    accountsHTML += '<div style="display:flex;gap:8px;margin-top:8px">';
+    accountsHTML += '<button id="antigravity-save-new-btn" style="padding:4px 12px;font-size:12px;background:var(--md-primary,#6750a4);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>';
+    accountsHTML += '<button id="antigravity-cancel-new-btn" style="padding:4px 12px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer">Cancel</button>';
+    accountsHTML += '</div></div></div>';
+    bodyEl.innerHTML = accountsHTML + buildFieldsHTML();
+    const addBtn = document.getElementById('antigravity-add-account-btn');
+    const addForm = document.getElementById('antigravity-add-form');
+    if (addBtn && addForm) {
+      addBtn.addEventListener('click', () => {
+        delete addForm.dataset.accountId;
+        addForm.querySelectorAll('input').forEach(input => { input.value = ''; });
+        addForm.hidden = false; addBtn.hidden = true;
+      });
+      document.getElementById('antigravity-cancel-new-btn')?.addEventListener('click', () => { addForm.hidden = true; addBtn.hidden = false; });
+      document.getElementById('antigravity-save-new-btn')?.addEventListener('click', async () => {
+        const name = document.getElementById('antigravity-new-name')?.value?.trim();
+        const baseUrl = document.getElementById('antigravity-new-url')?.value?.trim();
+        const csrfToken = document.getElementById('antigravity-new-token')?.value?.trim();
+        const expectedEmail = document.getElementById('antigravity-new-email')?.value?.trim();
+        if (!name) { alert('Account name is required'); return; }
+        try {
+          const editingId = addForm.dataset.accountId;
+          const body = { name, base_url: baseUrl, expected_email: expectedEmail };
+          if (!editingId || csrfToken) body.csrf_token = csrfToken;
+          const res = await authFetch(`${API_BASE}/api/antigravity/accounts${editingId ? '?id=' + editingId : ''}`, {
+            method: editingId ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (res.ok) {
+            await loadAntigravityAccounts();
+            await openProviderSettingsModal('antigravity');
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert('Failed to create account: ' + (err.error || res.statusText));
+          }
+        } catch (e) { alert('Failed to create account: ' + e.message); }
+      });
+    }
+    const accountsList = document.getElementById('antigravity-accounts-list');
+    try {
+      const res = await authFetch(`${API_BASE}/api/antigravity/accounts`);
+      if (res.ok) {
+        const data = await res.json();
+        const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+        let html = '';
+        accounts.forEach(account => {
+          const isDeleted = !!account.deletedAt;
+          const detail = isDeleted ? 'Deleted' : (account.legacy ? 'Legacy local connection (auto-detect)' : (account.baseUrl || 'No bridge URL'));
+          const email = account.expectedEmail ? ' - expected ' + escapeHtml(account.expectedEmail) : '';
+          html += `<div class="minimax-account-item" style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-light)">`;
+          html += `<div style="flex:1"><div style="font-weight:500">${escapeHtml(account.name)}</div><div style="font-size:12px;color:var(--text-secondary)">${escapeHtml(detail)}${email}</div></div>`;
+          html += `<div style="display:flex;gap:8px;align-items:center">`;
+          if (!isDeleted) {
+            html += `<button class="antigravity-acct-btn" data-action="edit" data-id="${account.id}" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer">Edit connection</button>`;
+            html += `<button class="antigravity-acct-btn" data-action="delete" data-id="${account.id}" data-name="${escapeHtml(account.name)}" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--md-error,#b3261e)">Delete</button>`;
+          } else {
+            html += `<button class="antigravity-acct-btn" data-action="restore" data-id="${account.id}" style="padding:4px 8px;font-size:12px;background:var(--surface-inset);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--accent-teal,#0d9488)">Restore</button>`;
+          }
+          html += `</div></div>`;
+        });
+        accountsList.innerHTML = html || '<p style="color:var(--text-secondary);font-size:13px;margin:0">No accounts configured. onWatch uses the local Antigravity connection.</p>';
+        accountsList.querySelectorAll('.antigravity-acct-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+            const id = btn.dataset.id;
+            if (action === 'edit') {
+              const account = accounts.find(a => String(a.id) === id);
+              addForm.dataset.accountId = id;
+              document.getElementById('antigravity-new-name').value = account.name;
+              document.getElementById('antigravity-new-url').value = account.baseUrl || '';
+              document.getElementById('antigravity-new-email').value = account.expectedEmail || '';
+              document.getElementById('antigravity-new-token').value = '';
+              document.getElementById('antigravity-new-token').placeholder = 'Leave blank to keep current token';
+              addForm.hidden = false; addBtn.hidden = true;
+              document.getElementById('antigravity-new-name').focus();
+              return;
+            }
+            if (action === 'delete' && !confirm(`Delete account "${btn.dataset.name}"? Historical data is preserved.`)) return;
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+              const res = action === 'delete'
+                ? await authFetch(`${API_BASE}/api/antigravity/accounts?id=${id}`, { method: 'DELETE' })
+                : await authFetch(`${API_BASE}/api/antigravity/accounts?id=${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ restore: true }),
+                  });
+              if (res.ok) {
+                await loadAntigravityAccounts();
+                await openProviderSettingsModal('antigravity');
+              } else {
+                const err = await res.json().catch(() => ({}));
+                alert(`${action === 'delete' ? 'Delete' : 'Restore'} failed: ` + (err.error || res.statusText));
+                btn.disabled = false;
+                btn.textContent = action === 'delete' ? 'Delete' : 'Restore';
+              }
+            } catch (e) {
+              alert(`${action === 'delete' ? 'Delete' : 'Restore'} failed: ` + e.message);
+              btn.disabled = false;
+              btn.textContent = action === 'delete' ? 'Delete' : 'Restore';
+            }
+          });
+        });
       } else {
         accountsList.innerHTML = '<p style="color:var(--text-secondary);font-size:13px">Failed to load accounts</p>';
       }
@@ -12523,7 +12771,7 @@ function gatherSettings() {
   const smtpHost = document.getElementById('smtp-host');
   if (smtpHost) {
     settings.smtp = {
-      events: Object.fromEntries(['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'exhausted', 'reset_soon'].map(event => [
+      events: Object.fromEntries(['warning', 'critical', 'reset', 'auth_error', 'starter_success', 'starter_failure', 'reset_credit_expiry', 'reset_credit_grant', 'exhausted', 'reset_soon'].map(event => [
         event, document.getElementById('smtp-event-' + event.replaceAll('_', '-'))?.checked ?? false,
       ])),
       host: smtpHost.value.trim(),
@@ -12564,6 +12812,7 @@ function gatherSettings() {
       notify_reset: document.getElementById('notify-reset')?.checked ?? true,
       notify_auth_error: document.getElementById('notify-auth-error')?.checked ?? false,
       notify_reset_credit_expiry: document.getElementById('notify-reset-credit-expiry')?.checked ?? true,
+      notify_reset_credit_grant: document.getElementById('notify-reset-credit-grant')?.checked ?? true,
       notify_repeat: document.getElementById('notify-repeat')?.checked ?? false,
       cooldown_minutes: parseInt(document.getElementById('notify-cooldown')?.value) || 30,
       channels: {
@@ -12826,6 +13075,7 @@ function loadWebhookSettings(webhook) {
     'webhook-event-reset': 'reset',
     'webhook-event-auth-error': 'auth_error',
     'webhook-event-reset-credit-expiry': 'reset_credit_expiry',
+    'webhook-event-reset-credit-grant': 'reset_credit_grant',
     'webhook-event-starter-success': 'starter_success',
     'webhook-event-starter-failure': 'starter_failure',
   };
@@ -12864,6 +13114,7 @@ function collectWebhookSettings() {
       reset: document.getElementById('webhook-event-reset')?.checked ?? false,
       auth_error: document.getElementById('webhook-event-auth-error')?.checked ?? false,
       reset_credit_expiry: document.getElementById('webhook-event-reset-credit-expiry')?.checked ?? false,
+      reset_credit_grant: document.getElementById('webhook-event-reset-credit-grant')?.checked ?? false,
       starter_success: document.getElementById('webhook-event-starter-success')?.checked ?? false,
       starter_failure: document.getElementById('webhook-event-starter-failure')?.checked ?? false,
     },
@@ -13599,6 +13850,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateMiniMaxAccountTabsVisibility();
   }
   initMiniMaxAccountTabs();
+
+  loadAntigravityAccount();
+  if (getCurrentProvider() === 'antigravity') {
+    await loadAntigravityAccounts();
+  } else {
+    updateAntigravityAccountVisibility();
+  }
+  initAntigravityAccountTabs();
   loadAPIIntegrationsPreferences();
 
   initTheme();
@@ -13799,4 +14058,50 @@ function renderMistralCards(data) {
     add('Pay-as-you-go spend',mistralMoney(b.amount,b.currency),b.amount==null?'Mistral has not returned a reliable spend amount.':new Date(b.periodStart).toLocaleDateString()+' - '+new Date(b.periodEnd).toLocaleDateString(),b.capturedAt&&b.amount!=null?(b.status==='stale'?'Stale · ':'')+'Updated '+new Date(b.capturedAt).toLocaleString():'You can hide PAYG in Settings > Providers > Mistral.',null);
   }
   renderMistralConnection(data);
+}
+
+function closeAntigravityAccountDropdown() {
+  const trigger = document.getElementById('antigravity-profile-trigger');
+  const menu = document.getElementById('antigravity-profile-menu');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  if (menu) menu.classList.remove('open');
+}
+
+function updateAntigravityAccountVisibility() {
+  const dropdown = document.getElementById('antigravity-profile-dropdown');
+  if (!dropdown) return;
+  const provider = getCurrentProvider();
+  dropdown.style.display = (provider === 'antigravity' && State.antigravityAccounts && State.antigravityAccounts.length > 1) ? '' : 'none';
+}
+
+function initAntigravityAccountTabs() {
+  const trigger = document.getElementById('antigravity-profile-trigger');
+  const menu = document.getElementById('antigravity-profile-menu');
+  if (!trigger || !menu) return;
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = menu.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) menu.querySelector('[aria-selected="true"]')?.focus();
+  });
+  trigger.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); menu.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+      menu.querySelector('[role="option"]')?.focus();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#antigravity-profile-dropdown')) {
+      closeAntigravityAccountDropdown();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.classList.contains('open')) {
+      closeAntigravityAccountDropdown(); trigger.focus();
+    }
+  });
 }

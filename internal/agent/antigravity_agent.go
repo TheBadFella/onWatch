@@ -2,8 +2,11 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
@@ -33,7 +36,19 @@ type AntigravityAgent struct {
 	// Manual configuration for Docker environments
 	manualBaseURL   string
 	manualCSRFToken string
+
+	// accountID scopes stored snapshots and cycles to one provider account.
+	accountID int64
+	// expectedEmail, when set, must match the email the bridge endpoint
+	// returns. A mismatch fails the poll instead of attributing another
+	// account usage to this one.
+	expectedEmail string
+	profileLabel  string
 }
+
+// ErrAntigravityIdentityMismatch reports that a bridge endpoint returned a
+// different account identity than the configured one.
+var ErrAntigravityIdentityMismatch = errors.New("antigravity: account identity mismatch")
 
 // AntigravityAgentOption configures an AntigravityAgent.
 type AntigravityAgentOption func(*AntigravityAgent)
@@ -44,6 +59,22 @@ func WithAntigravityManualConfig(baseURL, csrfToken string) AntigravityAgentOpti
 	return func(a *AntigravityAgent) {
 		a.manualBaseURL = baseURL
 		a.manualCSRFToken = csrfToken
+	}
+}
+
+// WithAntigravityAccount scopes the agent to one provider account and, when
+// expectedEmail is non-empty, verifies the endpoint's returned identity.
+func WithAntigravityAccount(accountID int64, expectedEmail string) AntigravityAgentOption {
+	return func(a *AntigravityAgent) {
+		a.accountID = accountID
+		a.expectedEmail = strings.TrimSpace(expectedEmail)
+	}
+}
+
+// WithAntigravityProfileLabel sets the account label used in notifications.
+func WithAntigravityProfileLabel(label string) AntigravityAgentOption {
+	return func(a *AntigravityAgent) {
+		a.profileLabel = strings.TrimSpace(label)
 	}
 }
 
@@ -86,6 +117,9 @@ func NewAntigravityAgent(
 		interval: interval,
 		logger:   logger,
 		sm:       sm,
+	}
+	if store != nil {
+		agent.accountID = store.DefaultAntigravityAccountID()
 	}
 
 	for _, opt := range opts {
@@ -168,13 +202,20 @@ func (a *AntigravityAgent) poll(ctx context.Context) {
 			return
 		}
 		a.logger.Error("Failed to fetch Antigravity quotas", "source", source, "error", err)
-		pollFailed("antigravity", "", err)
+		pollFailed("antigravity", fmt.Sprintf("%d", a.accountID), err)
+		return
+	}
+
+	if err := a.verifySnapshotIdentity(snapshot); err != nil {
+		a.logger.Error("Antigravity account identity verification failed",
+			"account_id", a.accountID, "expected_email", a.expectedEmail, "error", err)
+		pollFailed("antigravity", fmt.Sprintf("%d", a.accountID), err)
 		return
 	}
 
 	// Store snapshot
-	pollSucceeded("antigravity", "")
-	if _, err := a.store.InsertAntigravitySnapshot(snapshot); err != nil {
+	pollSucceeded("antigravity", fmt.Sprintf("%d", a.accountID))
+	if _, err := a.store.InsertAntigravitySnapshot(snapshot, a.accountID); err != nil {
 		a.logger.Error("Failed to insert Antigravity snapshot", "error", err)
 	}
 
@@ -190,6 +231,8 @@ func (a *AntigravityAgent) poll(ctx context.Context) {
 			utilization := (1.0 - g.RemainingFraction) * 100
 			a.notifier.Check(notify.QuotaStatus{
 				Provider:    "antigravity",
+				AccountID:   fmt.Sprintf("%d", a.accountID),
+				AccountName: a.profileLabel,
 				QuotaKey:    g.GroupKey,
 				Utilization: utilization,
 				Limit:       100, // Percentage-based
@@ -262,6 +305,31 @@ func (a *AntigravityAgent) fetchIDE(ctx context.Context) (*api.AntigravitySnapsh
 	snap.Source = api.AntigravitySourceIDE
 	return snap, nil
 }
+
+// verifySnapshotIdentity rejects a snapshot whose reported email does not match
+// the configured expected identity. An expected identity with no reported email
+// is also a failure: an unverifiable response must not be attributed to the
+// account. With no expected identity, the platform identity is recorded as
+// reported and nothing is rejected.
+func (a *AntigravityAgent) verifySnapshotIdentity(snapshot *api.AntigravitySnapshot) error {
+	if a.expectedEmail == "" {
+		return nil
+	}
+	got := ""
+	if snapshot != nil {
+		got = strings.TrimSpace(snapshot.Email)
+	}
+	if got == "" {
+		return fmt.Errorf("%w: endpoint did not report an account email", ErrAntigravityIdentityMismatch)
+	}
+	if !strings.EqualFold(got, a.expectedEmail) {
+		return fmt.Errorf("%w: got %q, expected %q", ErrAntigravityIdentityMismatch, got, a.expectedEmail)
+	}
+	return nil
+}
+
+// AccountID returns the database account this agent writes to.
+func (a *AntigravityAgent) AccountID() int64 { return a.accountID }
 
 // IsConnected returns true if the agent has a valid connection to the language server.
 func (a *AntigravityAgent) IsConnected() bool {

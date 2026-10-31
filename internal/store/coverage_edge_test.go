@@ -151,7 +151,7 @@ func TestDroppedTable_QueryLatestAntigravity_ModelValuesError(t *testing.T) {
 	defer s.Close()
 
 	_, err := s.db.Exec(
-		`INSERT INTO antigravity_snapshots (captured_at, model_count) VALUES (?, 0)`,
+		`INSERT INTO antigravity_snapshots (account_id, captured_at, model_count) VALUES ((SELECT id FROM provider_accounts WHERE provider='antigravity' AND name='default'), ?, 0)`,
 		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -171,7 +171,7 @@ func TestDroppedTable_QueryAntigravityRange_ModelValuesError(t *testing.T) {
 
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
-		`INSERT INTO antigravity_snapshots (captured_at, model_count) VALUES (?, 0)`,
+		`INSERT INTO antigravity_snapshots (account_id, captured_at, model_count) VALUES ((SELECT id FROM provider_accounts WHERE provider='antigravity' AND name='default'), ?, 0)`,
 		now.Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestDroppedTable_QueryAntigravitySnapshotAtOrBefore_ModelValuesError(t *tes
 
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
-		`INSERT INTO antigravity_snapshots (captured_at, model_count) VALUES (?, 0)`,
+		`INSERT INTO antigravity_snapshots (account_id, captured_at, model_count) VALUES ((SELECT id FROM provider_accounts WHERE provider='antigravity' AND name='default'), ?, 0)`,
 		now.Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -446,7 +446,7 @@ func TestAntigravityStore_getAntigravityGroupedCrossQuotasAt_Fallback(t *testing
 	}
 
 	// Query with referenceTime BEFORE the snapshot - forces fallback to QueryLatestAntigravity
-	entries, err := s.getAntigravityGroupedCrossQuotasAt(now.Add(-24 * time.Hour))
+	entries, err := s.getAntigravityGroupedCrossQuotasAt(s.DefaultAntigravityAccountID(), now.Add(-24*time.Hour))
 	if err != nil {
 		t.Fatalf("getAntigravityGroupedCrossQuotasAt: %v", err)
 	}

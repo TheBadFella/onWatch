@@ -67,6 +67,8 @@ type NotificationTypes struct {
 	AuthError bool `json:"auth_error"` // Auth failure notifications
 	// ResetCreditExpiry warns before a banked Codex reset credit expires.
 	ResetCreditExpiry bool `json:"reset_credit_expiry"`
+	// ResetCreditGrant announces a newly available banked Codex reset credit.
+	ResetCreditGrant bool `json:"reset_credit_grant"`
 }
 
 // QuotaStatus represents the current state of a quota for notification evaluation.
@@ -96,7 +98,7 @@ func New(s *store.Store, logger *slog.Logger) *NotificationEngine {
 			Critical:  95,
 			Overrides: make(map[string]ThresholdOverride),
 			Cooldown:  defaultNotificationCooldown,
-			Types:     NotificationTypes{Warning: true, Critical: true, Reset: false, ResetCreditExpiry: true},
+			Types:     NotificationTypes{Warning: true, Critical: true, Reset: false, ResetCreditExpiry: true, ResetCreditGrant: true},
 			Channels:  NotificationChannels{Email: true, Push: true},
 		},
 	}
@@ -142,6 +144,7 @@ type notificationSettingsJSON struct {
 	NotifyReset             bool                  `json:"notify_reset"`
 	NotifyAuthError         bool                  `json:"notify_auth_error"`
 	NotifyResetCreditExpiry *bool                 `json:"notify_reset_credit_expiry"`
+	NotifyResetCreditGrant  *bool                 `json:"notify_reset_credit_grant"`
 	NotifyRepeat            bool                  `json:"notify_repeat"`
 	CooldownMinutes         int                   `json:"cooldown_minutes"`
 	Channels                *NotificationChannels `json:"channels,omitempty"`
@@ -196,6 +199,8 @@ func (e *NotificationEngine) Reload() error {
 		// Default on when the setting is absent: an expiring banked reset is
 		// value the user asked to be warned about.
 		ResetCreditExpiry: notif.NotifyResetCreditExpiry == nil || *notif.NotifyResetCreditExpiry,
+		// Default on when absent, matching the expiry warning.
+		ResetCreditGrant: notif.NotifyResetCreditGrant == nil || *notif.NotifyResetCreditGrant,
 	}
 
 	overrides := make(map[string]ThresholdOverride, len(notif.Overrides))
@@ -1279,4 +1284,118 @@ func (e *NotificationEngine) SendTestWebhook() error {
 		Message:   "This is a test notification from onWatch. Your webhook endpoint is reachable.",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// ResetCreditGrant describes one newly available banked Codex reset credit.
+type ResetCreditGrant struct {
+	CreditID  string
+	Title     string
+	GrantedAt *time.Time
+	ExpiresAt *time.Time
+	// ExpiryUnknown marks a backend expiry that cannot be trusted. The message
+	// says so instead of omitting the date silently.
+	ExpiryUnknown bool
+}
+
+// ResetCreditGrantAlert batches the reset credits discovered in one detail
+// fetch so a simultaneous grant produces one message.
+type ResetCreditGrantAlert struct {
+	AccountID   string
+	AccountName string
+	Credits     []ResetCreditGrant
+}
+
+// SendResetCreditGrantNotification delivers one message for newly available
+// banked reset credits. Dedupe lives in the credit rows (grant_notified_at), so
+// the caller claims each row before calling this and releases the claims if no
+// channel accepted the message. Returns true when at least one channel
+// succeeded. Delivery is at-most-once per claim; it is not a guarantee across a
+// process crash between the send and the next poll.
+func (e *NotificationEngine) SendResetCreditGrantNotification(alert ResetCreditGrantAlert) bool {
+	e.mu.RLock()
+	cfg := e.cfg
+	channels := channelSet{
+		mailer:  e.mailer,
+		push:    e.pushSender,
+		webhook: e.webhookSender,
+		enabled: e.cfg.Channels,
+	}
+	e.mu.RUnlock()
+
+	if !cfg.Types.ResetCreditGrant || len(alert.Credits) == 0 {
+		return false
+	}
+
+	account := strings.TrimSpace(alert.AccountName)
+	if account == "" {
+		account = "Codex account " + alert.AccountID
+	}
+
+	count := len(alert.Credits)
+	noun := "reset credit"
+	if count != 1 {
+		noun = "reset credits"
+	}
+	subject := fmt.Sprintf("[RESET CREDIT] %s: %d new %s", account, count, noun)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d new banked Codex %s for %s.\n", count, noun, account)
+	for _, credit := range alert.Credits {
+		label := strings.TrimSpace(credit.Title)
+		if label == "" {
+			label = "Reset credit"
+		}
+		fmt.Fprintf(&sb, "\n- %s", label)
+		if credit.GrantedAt != nil {
+			fmt.Fprintf(&sb, " granted %s", credit.GrantedAt.UTC().Format("2006-01-02 15:04 UTC"))
+		}
+		if credit.ExpiresAt != nil {
+			fmt.Fprintf(&sb, " expires %s", credit.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"))
+		} else if credit.ExpiryUnknown {
+			sb.WriteString(" (expiry unknown)")
+		}
+	}
+	sb.WriteString("\n\nFor reference, the Codex CLI exposes banked reset credits under /usage.")
+	sb.WriteString("\n\n-- Sent by onWatch")
+	message := sb.String()
+
+	sent := false
+	if channels.emailEnabled(EventResetCreditGrant) {
+		if err := channels.mailer.Send(subject, message); err != nil {
+			e.logger.Error("failed to send reset-credit grant email", "error", err, "account", alert.AccountID)
+		} else {
+			sent = true
+		}
+	}
+	if channels.enabled.Push && channels.push != nil {
+		subs, err := e.store.GetPushSubscriptions()
+		if err != nil {
+			e.logger.Error("failed to get push subscriptions", "error", err)
+		} else {
+			for _, sub := range subs {
+				ps := PushSubscription{Endpoint: sub.Endpoint}
+				ps.Keys.P256dh = sub.P256dh
+				ps.Keys.Auth = sub.Auth
+				if err := channels.push.Send(ps, subject, message); err != nil {
+					e.logger.Error("failed to send reset-credit grant push", "error", err, "endpoint", sub.Endpoint)
+					if strings.Contains(err.Error(), "410") {
+						e.store.DeletePushSubscription(sub.Endpoint)
+					}
+				} else {
+					sent = true
+				}
+			}
+		}
+	}
+	if channels.deliverWebhook(e.logger, WebhookPayload{
+		Event:       EventResetCreditGrant,
+		Provider:    "codex",
+		AccountID:   alert.AccountID,
+		AccountName: account,
+		Title:       subject,
+		Message:     message,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}) {
+		sent = true
+	}
+	return sent
 }

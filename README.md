@@ -1,5 +1,7 @@
 # onWatch - personal fork
 
+[![Version](https://img.shields.io/badge/Version-v1.1.0-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.0)
+
 This is my fork of [onllm-dev/onWatch](https://github.com/onllm-dev/onWatch), maintained for my own multi-account monitoring setup.
 The changes focus on the dashboard, account connections, subscription costs, reset visibility, and notifications.
 
@@ -11,6 +13,8 @@ This README covers the additions and changes in this fork.
 - A collapsible left sidebar with a compact icon view, mobile navigation, and keyboard controls.
 - A revised dark theme with neutral card surfaces and clearer spacing.
 - Account overviews and individual account views, with the selected Codex account name shown above its details.
+- Separate Antigravity account histories through authenticated bridge endpoints, with account selection and connection editing.
+- Notifications when new Codex reset credits become available, plus existing expiry warnings.
 - Available quota percentages and live reset countdowns on account cards and provider headings.
 - Usage updates that preserve existing cards, charts, expanded details, and keyboard focus instead of rebuilding the page on each poll.
 - Consumption-rate explanations beside table headings, with pagination kept separate.

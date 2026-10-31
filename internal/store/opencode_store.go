@@ -553,7 +553,7 @@ func (s *Store) QueryOpenCodeCycleOverview(groupBy string, limit int) ([]CycleOv
 			ORDER BY qv.utilization DESC LIMIT 1`,
 			groupBy,
 			c.CycleStart.Format(time.RFC3339Nano),
-			endBoundary.Format(time.RFC3339Nano),
+			endBoundary.UTC().Format(time.RFC3339Nano),
 		).Scan(&snapshotID, &capturedAt)
 
 		if err == sql.ErrNoRows {

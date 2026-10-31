@@ -26,6 +26,10 @@ type CodexResetCreditRecord struct {
 	LastSeen      time.Time
 	GoneAt        *time.Time
 	NotifiedAt    *time.Time
+	// GrantNotifiedAt is the one-time "new grant" announcement marker. It is
+	// distinct from NotifiedAt (the expiry warning) so a newly granted credit
+	// is announced once without suppressing its later expiry warning.
+	GrantNotifiedAt *time.Time
 }
 
 // SyncCodexResetCredits upserts the credits from one successful detail fetch
@@ -158,7 +162,7 @@ func (s *Store) QueryCodexResetCredits(accountID int64) ([]CodexResetCreditRecor
 	}
 	rows, err := s.db.Query(
 		`SELECT account_id, credit_id, status, reset_type, title, description, granted_at, expires_at,
-			unsupported_by_plan, expiry_unknown, first_seen, last_seen, gone_at, notified_at
+			unsupported_by_plan, expiry_unknown, first_seen, last_seen, gone_at, notified_at, grant_notified_at
 		FROM codex_reset_credits
 		WHERE account_id = ?
 		ORDER BY (expires_at IS NULL), expires_at ASC, credit_id ASC
@@ -193,7 +197,7 @@ func (s *Store) QueryCodexResetCreditsNeedingExpiryNotice(accountID int64, now t
 
 	rows, err := s.db.Query(
 		`SELECT account_id, credit_id, status, reset_type, title, description, granted_at, expires_at,
-			unsupported_by_plan, expiry_unknown, first_seen, last_seen, gone_at, notified_at
+			unsupported_by_plan, expiry_unknown, first_seen, last_seen, gone_at, notified_at, grant_notified_at
 		FROM codex_reset_credits
 		WHERE account_id = ?
 			AND status = 'available'
@@ -357,13 +361,13 @@ func (s *Store) QueryCodexResetCreditCheckStatus(accountID int64) (*CodexResetCr
 
 func scanCodexResetCredit(rows *sql.Rows) (CodexResetCreditRecord, error) {
 	var rec CodexResetCreditRecord
-	var grantedAt, expiresAt, firstSeen, lastSeen, goneAt, notifiedAt sql.NullString
+	var grantedAt, expiresAt, firstSeen, lastSeen, goneAt, notifiedAt, grantNotifiedAt sql.NullString
 	if err := rows.Scan(
 		&rec.AccountID, &rec.CreditID, &rec.Status, &rec.ResetType,
 		&rec.Title, &rec.Description,
 		&grantedAt, &expiresAt,
 		&rec.UnsupportedByPlan, &rec.ExpiryUnknown,
-		&firstSeen, &lastSeen, &goneAt, &notifiedAt,
+		&firstSeen, &lastSeen, &goneAt, &notifiedAt, &grantNotifiedAt,
 	); err != nil {
 		return rec, fmt.Errorf("codex reset credits: scan: %w", err)
 	}
@@ -377,6 +381,7 @@ func scanCodexResetCredit(rows *sql.Rows) (CodexResetCreditRecord, error) {
 	}
 	rec.GoneAt = parseNullableCodexTime(goneAt)
 	rec.NotifiedAt = parseNullableCodexTime(notifiedAt)
+	rec.GrantNotifiedAt = parseNullableCodexTime(grantNotifiedAt)
 	return rec, nil
 }
 
@@ -389,4 +394,162 @@ func parseNullableCodexTime(value sql.NullString) *time.Time {
 		return nil
 	}
 	return &parsed
+}
+
+// CodexResetCreditGrantBaseline is the account's "new grant" notification
+// baseline: credits first fetched at or before this time are never announced as
+// new.
+type CodexResetCreditGrantBaseline struct {
+	AccountID  int64
+	BaselineAt time.Time
+}
+
+// EstablishCodexResetCreditGrantBaseline records the first successful detail
+// fetch for an account and marks every credit known at that point as already
+// announced, so enabling grant notifications never replays existing credits. It
+// reports true only for the call that created the baseline. An empty response
+// still records the baseline, so a credit granted later is detected.
+func (s *Store) EstablishCodexResetCreditGrantBaseline(accountID int64, at time.Time) (bool, error) {
+	if accountID == 0 {
+		accountID = DefaultCodexAccountID
+	}
+	at = at.UTC()
+	stamp := at.Format(time.RFC3339Nano)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("codex reset credit grants: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`INSERT INTO codex_reset_credit_grant_state (account_id, baseline_at)
+		VALUES (?, ?)
+		ON CONFLICT(account_id) DO NOTHING`,
+		accountID, stamp,
+	)
+	if err != nil {
+		return false, fmt.Errorf("codex reset credit grants: insert baseline: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("codex reset credit grants: baseline rows: %w", err)
+	}
+	established := affected > 0
+	if established {
+		if _, err := tx.Exec(
+			`UPDATE codex_reset_credits SET grant_notified_at = ?
+			WHERE account_id = ? AND grant_notified_at IS NULL`,
+			stamp, accountID,
+		); err != nil {
+			return false, fmt.Errorf("codex reset credit grants: baseline mark: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("codex reset credit grants: commit: %w", err)
+	}
+	return established, nil
+}
+
+// QueryCodexResetCreditGrantBaseline returns the account's baseline, or nil when
+// no successful detail fetch has happened yet.
+func (s *Store) QueryCodexResetCreditGrantBaseline(accountID int64) (*CodexResetCreditGrantBaseline, error) {
+	if accountID == 0 {
+		accountID = DefaultCodexAccountID
+	}
+	var baseline CodexResetCreditGrantBaseline
+	var raw string
+	err := s.db.QueryRow(
+		`SELECT account_id, baseline_at FROM codex_reset_credit_grant_state WHERE account_id = ?`,
+		accountID,
+	).Scan(&baseline.AccountID, &raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("codex reset credit grants: query baseline: %w", err)
+	}
+	baseline.BaselineAt, _ = time.Parse(time.RFC3339Nano, raw)
+	return &baseline, nil
+}
+
+// QueryCodexResetCreditsNeedingGrantNotice returns currently available,
+// plan-usable credits that have not been announced as newly granted. A credit
+// that disappeared and reappeared keeps its marker, so it is not announced
+// twice. Ordered so credits discovered together batch in a stable order.
+func (s *Store) QueryCodexResetCreditsNeedingGrantNotice(accountID int64, now time.Time) ([]CodexResetCreditRecord, error) {
+	if accountID == 0 {
+		accountID = DefaultCodexAccountID
+	}
+	rows, err := s.db.Query(
+		`SELECT account_id, credit_id, status, reset_type, title, description, granted_at, expires_at,
+			unsupported_by_plan, expiry_unknown, first_seen, last_seen, gone_at, notified_at, grant_notified_at
+		FROM codex_reset_credits
+		WHERE account_id = ?
+			AND status = 'available'
+			AND gone_at IS NULL
+			AND grant_notified_at IS NULL
+			AND unsupported_by_plan = 0
+			AND (expires_at IS NULL OR expires_at > ?)
+		ORDER BY (granted_at IS NULL), granted_at ASC, first_seen ASC, credit_id ASC
+		LIMIT 50`,
+		accountID,
+		now.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("codex reset credit grants: query pending: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CodexResetCreditRecord
+	for rows.Next() {
+		record, err := scanCodexResetCredit(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+// ClaimCodexResetCreditGrantNotice atomically claims the one "new grant"
+// announcement slot for a credit. It reports true only for the caller that set
+// the marker, so a restarted process or a concurrent poller never re-sends the
+// same claim. External delivery is at-most-once per claim, not a guarantee
+// across a process crash between send and commit.
+func (s *Store) ClaimCodexResetCreditGrantNotice(accountID int64, creditID string, claimedAt time.Time) (bool, error) {
+	if accountID == 0 {
+		accountID = DefaultCodexAccountID
+	}
+	result, err := s.db.Exec(
+		`UPDATE codex_reset_credits SET grant_notified_at = ?
+		WHERE account_id = ? AND credit_id = ? AND grant_notified_at IS NULL`,
+		claimedAt.UTC().Format(time.RFC3339), accountID, creditID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("codex reset credit grants: claim: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("codex reset credit grants: claim rows: %w", err)
+	}
+	return affected > 0, nil
+}
+
+// ReleaseCodexResetCreditGrantNotice clears a claim made at exactly claimedAt,
+// so a batch that reached no channel is retried on a later detail fetch.
+func (s *Store) ReleaseCodexResetCreditGrantNotice(accountID int64, creditID string, claimedAt time.Time) error {
+	if accountID == 0 {
+		accountID = DefaultCodexAccountID
+	}
+	_, err := s.db.Exec(
+		`UPDATE codex_reset_credits SET grant_notified_at = NULL
+		WHERE account_id = ? AND credit_id = ? AND grant_notified_at = ?`,
+		accountID, creditID, claimedAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("codex reset credit grants: release: %w", err)
+	}
+	return nil
 }

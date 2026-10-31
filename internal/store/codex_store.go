@@ -676,7 +676,7 @@ func (s *Store) QueryCodexCycleOverview(accountID int64, groupBy string, limit i
 			accountID,
 			groupBy,
 			c.CycleStart.Format(time.RFC3339Nano),
-			endBoundary.Format(time.RFC3339Nano),
+			endBoundary.UTC().Format(time.RFC3339Nano),
 		).Scan(&snapshotID, &capturedAt)
 
 		if err == sql.ErrNoRows {
@@ -703,7 +703,7 @@ func (s *Store) QueryCodexCycleOverview(accountID int64, groupBy string, limit i
 			ORDER BY captured_at ASC LIMIT 1`,
 			accountID,
 			c.CycleStart.Format(time.RFC3339Nano),
-			endBoundary.Format(time.RFC3339Nano),
+			endBoundary.UTC().Format(time.RFC3339Nano),
 		).Scan(&firstSnapshotID)
 		if err == nil {
 			firstIDs = append(firstIDs, firstSnapshotID)
@@ -1106,6 +1106,10 @@ func (s *Store) MergeCodexAccountData(targetID, sourceID int64) error {
 				SELECT tgt.notified_at FROM codex_reset_credits AS tgt
 				WHERE tgt.account_id = ? AND tgt.credit_id = src.credit_id
 			)),
+			grant_notified_at = COALESCE(src.grant_notified_at, (
+				SELECT tgt.grant_notified_at FROM codex_reset_credits AS tgt
+				WHERE tgt.account_id = ? AND tgt.credit_id = src.credit_id
+			)),
 			first_seen = MIN(src.first_seen, COALESCE((
 				SELECT tgt.first_seen FROM codex_reset_credits AS tgt
 				WHERE tgt.account_id = ? AND tgt.credit_id = src.credit_id
@@ -1128,7 +1132,7 @@ func (s *Store) MergeCodexAccountData(targetID, sourceID int64) error {
 				ELSE src.gone_at
 			END
 		WHERE src.account_id = ?`,
-		targetID, targetID, targetID, targetID, targetID, sourceID,
+		targetID, targetID, targetID, targetID, targetID, targetID, sourceID,
 	); err != nil {
 		return fmt.Errorf("failed to merge reset-credit metadata: %w", err)
 	}
@@ -1137,6 +1141,36 @@ func (s *Store) MergeCodexAccountData(targetID, sourceID int64) error {
 		targetID, sourceID,
 	); err != nil {
 		return fmt.Errorf("failed to merge reset credits: %w", err)
+	}
+	// Move the grant-notice baseline to the target (keeping the earlier one) and
+	// suppress merged credits that already existed at that baseline. A credit
+	// first seen after it stays pending, so a genuinely new grant still announces.
+	if _, err := tx.Exec(
+		`INSERT INTO codex_reset_credit_grant_state (account_id, baseline_at)
+		SELECT ?, baseline_at FROM codex_reset_credit_grant_state WHERE account_id = ?
+		ON CONFLICT(account_id) DO UPDATE SET
+			baseline_at = MIN(codex_reset_credit_grant_state.baseline_at, excluded.baseline_at)`,
+		targetID, sourceID,
+	); err != nil {
+		return fmt.Errorf("failed to merge reset-credit grant baseline: %w", err)
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM codex_reset_credit_grant_state WHERE account_id = ?`,
+		sourceID,
+	); err != nil {
+		return fmt.Errorf("failed to clear source reset-credit grant baseline: %w", err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE codex_reset_credits SET grant_notified_at = (
+			SELECT baseline_at FROM codex_reset_credit_grant_state WHERE account_id = ?
+		)
+		WHERE account_id = ? AND grant_notified_at IS NULL
+			AND julianday(first_seen) <= julianday((
+				SELECT baseline_at FROM codex_reset_credit_grant_state WHERE account_id = ?
+			))`,
+		targetID, targetID, targetID,
+	); err != nil {
+		return fmt.Errorf("failed to suppress historical merged reset credits: %w", err)
 	}
 	// The target's last-check row stands; both accounts polled the same identity.
 	if _, err := tx.Exec(
