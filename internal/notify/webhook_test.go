@@ -1047,3 +1047,66 @@ func TestEngineConfigureWebhookClosesPreviousSender(t *testing.T) {
 		t.Error("previous sender was not closed on reconfigure")
 	}
 }
+
+func TestStarterBatch_OneNotificationListsBothWindows(t *testing.T) {
+	engine, _, capture := setupWebhookEngine(t)
+	engine.SendStarterEvent(StarterEvent{Provider: "codex", AccountID: "1", QuotaKeys: []string{"five_hour", "seven_day"}, Success: true})
+	payloads := capture.all()
+	if len(payloads) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(payloads))
+	}
+	got := payloads[0]
+	if len(got.QuotaKeys) != 2 || got.QuotaKey != "" {
+		t.Fatalf("quota keys: %+v", got)
+	}
+	if !strings.Contains(got.Message, "5-hour limit") || !strings.Contains(got.Message, "Weekly limit") || !strings.Contains(got.Message, "one small starter request") {
+		t.Fatalf("message = %s", got.Message)
+	}
+	embed, err := formatDiscordEmbed(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(embed), "5-hour limit, Weekly limit") || !strings.Contains(string(embed), "Windows started") {
+		t.Fatalf("Discord embed = %s", embed)
+	}
+}
+
+func TestStarterBatch_FailureRetryAndPerWindowDedupe(t *testing.T) {
+	engine, _, capture := setupWebhookEngine(t)
+	ev := StarterEvent{Provider: "codex", AccountID: "1", QuotaKeys: []string{"five_hour", "seven_day"}, Detail: "request timed out"}
+	engine.cfg.Channels.Webhook = false
+	engine.SendStarterEvent(ev)
+	engine.cfg.Channels.Webhook = true
+	engine.SendStarterEvent(ev)
+	engine.SendStarterEvent(ev)
+	if capture.count() != 1 {
+		t.Fatalf("failure notifications = %d, want 1", capture.count())
+	}
+	ev.QuotaKeys = []string{"five_hour", "code_review"}
+	engine.SendStarterEvent(ev)
+	got := capture.all()[1]
+	if capture.count() != 2 || got.QuotaKey != "code_review" {
+		t.Fatalf("already notified window was repeated: %+v", got)
+	}
+	ev.QuotaKeys = []string{"five_hour", "seven_day"}
+	ev.Success = true
+	engine.SendStarterEvent(ev)
+	ev.Success = false
+	engine.SendStarterEvent(ev)
+	if capture.count() != 4 {
+		t.Fatalf("notifications after successful retry = %d, want 4", capture.count())
+	}
+}
+
+func TestStarterBatch_OneEmailForBothWindows(t *testing.T) {
+	st := newTestStore(t)
+	defer st.Close()
+	engine := newTestEngine(t, st)
+	count, cleanup := setupSMTPAndMailer(t, st, engine)
+	defer cleanup()
+	engine.mailer.config.Events = &WebhookEvents{StarterSuccess: true}
+	engine.SendStarterEvent(StarterEvent{Provider: "codex", AccountID: "1", QuotaKeys: []string{"five_hour", "seven_day"}, Success: true})
+	if count.Load() != 1 {
+		t.Fatalf("emails = %d, want 1", count.Load())
+	}
+}

@@ -563,9 +563,7 @@ func (a *CodexAgent) maybeAutoStartWindows(ctx context.Context, quotas []api.Cod
 	// 5-hour window cannot work while this account's weekly quota is exhausted.
 	for _, q := range quotas {
 		if q.Name == "seven_day" && q.Utilization >= 100 && (q.ResetsAt == nil || q.ResetsAt.After(now)) {
-			for _, window := range windows {
-				a.sendStarterEvent(window, false, "Weekly limit exhausted; no starter request was sent.")
-			}
+			a.sendStarterEvent(windows, false, "Weekly limit exhausted; no starter request was sent.")
 			return
 		}
 	}
@@ -1031,27 +1029,23 @@ func (a *CodexAgent) sendStarterPing(ctx context.Context, codexAccountID string,
 		}
 		a.logger.Warn("Codex auto quota-starter ping failed",
 			"quotas", windows, "account_id", a.accountID, "model", api.CodexStarterModel(), "error", err)
-		for _, w := range windows {
-			a.sendStarterEvent(w, false, err.Error())
-		}
+		a.sendStarterEvent(windows, false, err.Error())
 		return
 	}
 	a.logger.Info("Codex auto quota-starter ping sent",
 		"quotas", windows, "account_id", a.accountID, "model", api.CodexStarterModel())
-	for _, w := range windows {
-		a.sendStarterEvent(w, true, "")
-	}
+	a.sendStarterEvent(windows, true, "")
 }
 
 // sendStarterEvent reports an auto quota-starter outcome to the notifier.
 // The detail is the transport error text, which never contains credentials.
-func (a *CodexAgent) sendStarterEvent(quotaName string, success bool, detail string) {
+func (a *CodexAgent) sendStarterEvent(quotaNames []string, success bool, detail string) {
 	if a.notifier == nil {
 		return
 	}
 	a.notifier.SendStarterEvent(notify.StarterEvent{
 		Provider:  "codex",
-		QuotaKey:  quotaName,
+		QuotaKeys: quotaNames,
 		AccountID: fmt.Sprintf("%d", a.accountID),
 		Success:   success,
 		Detail:    detail,

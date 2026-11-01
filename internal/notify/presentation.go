@@ -39,6 +39,14 @@ func quotaLabel(key string) string {
 	return strings.ReplaceAll(key, "_", " ")
 }
 
+func quotaLabels(keys []string) string {
+	labels := make([]string, 0, len(keys))
+	for _, key := range keys {
+		labels = append(labels, quotaLabel(key))
+	}
+	return strings.Join(labels, ", ")
+}
+
 func resetCauseLabel(cause string) string {
 	switch cause {
 	case "scheduled":
