@@ -222,3 +222,10 @@ Reset times retain the provider's timestamp. Discord shows a local date/time
 alongside the exact UTC date and time including seconds; SMTP also includes
 seconds and UTC. OnWatch cannot guarantee the provider will honor its reported
 schedule if it later changes.
+
+### Starter batches
+
+One starter request produces one success or failure notification. When it covers
+multiple windows, the payload lists them in `quota_keys` (for example,
+`["five_hour", "seven_day"]`). Single-window events keep `quota_key`.
+Failure deduplication remains per account and window.

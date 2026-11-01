@@ -1052,6 +1052,7 @@ func (e *NotificationEngine) ConfigureWebhook() error {
 type StarterEvent struct {
 	Provider  string
 	QuotaKey  string
+	QuotaKeys []string
 	AccountID string
 	Success   bool
 	Detail    string // failure reason, or extra context on success
@@ -1065,19 +1066,37 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 	e.starterNotifyMu.Lock()
 	defer e.starterNotifyMu.Unlock()
 	provider := normalizeNotificationProvider(ev.Provider)
-	failureKey := "starter:" + notificationQuotaKey(QuotaStatus{QuotaKey: ev.QuotaKey, AccountID: ev.AccountID})
-	if e.store != nil {
-		if ev.Success {
-			if err := e.store.ClearNotificationLog(provider, failureKey); err != nil {
-				e.logger.Error("failed to clear starter failure after success", "error", err)
-			}
-		} else {
-			sentAt, _, err := e.store.GetLastNotification(provider, failureKey, EventStarterFailure)
-			if err == nil && !sentAt.IsZero() {
-				return
+	keys := ev.QuotaKeys
+	if len(keys) == 0 {
+		keys = []string{ev.QuotaKey}
+	}
+	pending := make([]string, 0, len(keys))
+	failureKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		failureKey := "starter:" + notificationQuotaKey(QuotaStatus{QuotaKey: key, AccountID: ev.AccountID})
+		if e.store != nil {
+			if ev.Success {
+				if err := e.store.ClearNotificationLog(provider, failureKey); err != nil {
+					e.logger.Error("failed to clear starter failure after success", "error", err)
+				}
+			} else {
+				sentAt, _, err := e.store.GetLastNotification(provider, failureKey, EventStarterFailure)
+				if err == nil && !sentAt.IsZero() {
+					continue
+				}
 			}
 		}
+		pending = append(pending, key)
+		failureKeys = append(failureKeys, failureKey)
 	}
+	if len(pending) == 0 {
+		return
+	}
+	ev.QuotaKey, ev.QuotaKeys = "", pending
+	if len(pending) == 1 {
+		ev.QuotaKey, ev.QuotaKeys = pending[0], nil
+	}
+	limitLabel := quotaLabels(pending)
 	e.mu.RLock()
 	channels := channelSet{mailer: e.mailer, webhook: e.webhookSender, enabled: e.cfg.Channels}
 	e.mu.RUnlock()
@@ -1095,11 +1114,15 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 	if account != "" {
 		context += " | " + account
 	}
-	title := fmt.Sprintf("[QUOTA STARTER] %s %s ping failed", context, quotaLabel(ev.QuotaKey))
+	title := fmt.Sprintf("[QUOTA STARTER] %s %s ping failed", context, limitLabel)
 	message := "The auto quota-starter ping did not complete."
 	if ev.Success {
-		title = fmt.Sprintf("[QUOTA STARTER] %s %s window started", context, quotaLabel(ev.QuotaKey))
+		title = fmt.Sprintf("[QUOTA STARTER] %s %s window started", context, limitLabel)
 		message = "OnWatch sent a small starter request to start the limit window. This is separate from the usage reset."
+		if len(pending) > 1 {
+			title = fmt.Sprintf("[QUOTA STARTER] %s windows started", context)
+			message = "OnWatch sent one small starter request for: " + limitLabel + ". This is separate from the usage reset."
+		}
 	}
 	blockedBy := ""
 	if !ev.Success && (strings.Contains(ev.Detail, "status code 429") || strings.Contains(ev.Detail, "Weekly limit exhausted")) {
@@ -1118,8 +1141,8 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 					for _, q := range snapshot.Quotas {
 						if q.Name == "seven_day" && q.Utilization >= 100 && age >= 0 && age <= 10*time.Minute && (q.ResetsAt == nil || q.ResetsAt.After(e.clock())) {
 							blockedBy = "Weekly limit"
-							title = fmt.Sprintf("[QUOTA STARTER] %s %s could not start: weekly limit exhausted", context, quotaLabel(ev.QuotaKey))
-							message = fmt.Sprintf("The %s could not start. This account's latest usage report shows its weekly limit exhausted (%.1f%% used). Weekly reset: %s. Wait for the weekly reset or use another account with available quota.", quotaLabel(ev.QuotaKey), q.Utilization, notificationTime(q.ResetsAt))
+							title = fmt.Sprintf("[QUOTA STARTER] %s %s could not start: weekly limit exhausted", context, limitLabel)
+							message = fmt.Sprintf("The %s could not start. This account's latest usage report shows its weekly limit exhausted (%.1f%% used). Weekly reset: %s. Wait for the weekly reset or use another account with available quota.", limitLabel, q.Utilization, notificationTime(q.ResetsAt))
 							break
 						}
 					}
@@ -1136,6 +1159,7 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		Event:       event,
 		Provider:    provider,
 		QuotaKey:    ev.QuotaKey,
+		QuotaKeys:   ev.QuotaKeys,
 		AccountID:   ev.AccountID,
 		AccountName: account,
 		WeeklyUsage: weeklyUsage,
@@ -1164,8 +1188,10 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 		sent = true
 	}
 	if !ev.Success && sent && e.store != nil {
-		if err := e.store.UpsertNotificationLogAt(provider, failureKey, EventStarterFailure, 0, e.clock()); err != nil {
-			e.logger.Error("failed to record starter failure notification", "error", err)
+		for _, failureKey := range failureKeys {
+			if err := e.store.UpsertNotificationLogAt(provider, failureKey, EventStarterFailure, 0, e.clock()); err != nil {
+				e.logger.Error("failed to record starter failure notification", "error", err)
+			}
 		}
 	}
 }

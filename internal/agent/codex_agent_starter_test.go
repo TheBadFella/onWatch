@@ -405,7 +405,7 @@ func TestCodexAgent_MaybeAutoStart_RetriesFailedStart(t *testing.T) {
 }
 
 // One turn starts every window, so two unstarted windows get one ping, with a
-// success notification for each window.
+// success notification listing both windows.
 func TestCodexAgent_MaybeAutoStart_OnePingForBothWindows(t *testing.T) {
 	var count atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -431,8 +431,8 @@ func TestCodexAgent_MaybeAutoStart_OnePingForBothWindows(t *testing.T) {
 	if got := count.Load(); got != 1 {
 		t.Errorf("starter fired %d times for two unstarted windows, want 1", got)
 	}
-	if events := waitDelivered(t, delivered, 2); len(events) != 2 {
-		t.Errorf("delivered events = %v, want one success per window", events)
+	if events := waitDelivered(t, delivered, 1); len(events) != 1 {
+		t.Errorf("delivered events = %v, want one combined success", events)
 	}
 }
 

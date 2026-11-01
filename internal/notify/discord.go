@@ -62,13 +62,17 @@ func discordColorForEvent(event string) int {
 // formatDiscordEmbed serializes a WebhookPayload into Discord's native embed JSON format.
 func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	fields := make([]discordEmbedField, 0, 4)
+	limitLabel := quotaLabel(payload.QuotaKey)
+	if len(payload.QuotaKeys) > 0 {
+		limitLabel = quotaLabels(payload.QuotaKeys)
+	}
 	account := payload.AccountName
 	if account == "" && payload.AccountID != "" {
 		account = "Account " + payload.AccountID
 	}
 	lines := []string{}
-	if payload.QuotaKey != "" && payload.Event != EventResetCreditExpiry {
-		lines = append(lines, "**Limit:** "+discordText(quotaLabel(payload.QuotaKey)))
+	if limitLabel != "" && payload.Event != EventResetCreditExpiry {
+		lines = append(lines, "**Limit:** "+discordText(limitLabel))
 	}
 	if payload.Reset != nil {
 		lines = append(lines, "**Usage:** "+usageChange(payload.Reset.BeforePercent, payload.Reset.AfterPercent))
@@ -89,8 +93,8 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	if account != "" {
 		context += " | " + account
 	}
-	if payload.QuotaKey != "" && payload.Event != EventResetCreditExpiry {
-		context += " | " + quotaLabel(payload.QuotaKey)
+	if limitLabel != "" && payload.Event != EventResetCreditExpiry {
+		context += " | " + limitLabel
 	}
 	title := payload.Title
 	description := payload.Message
@@ -113,6 +117,9 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	}
 	if payload.Event == EventStarterSuccess {
 		title = "▶ " + context + " | Window started"
+		if len(payload.QuotaKeys) > 1 {
+			title = "▶ " + context + " | Windows started"
+		}
 	}
 	if payload.Event == EventExhausted {
 		title = "🚨 " + context + " | Quota exhausted"

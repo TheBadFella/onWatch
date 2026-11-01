@@ -132,6 +132,7 @@ type WebhookPayload struct {
 	Event       string                       `json:"event"`
 	Provider    string                       `json:"provider"`
 	QuotaKey    string                       `json:"quota_key,omitempty"`
+	QuotaKeys   []string                     `json:"quota_keys,omitempty"`
 	AccountID   string                       `json:"account_id,omitempty"`
 	AccountName string                       `json:"account_name,omitempty"`
 	WeeklyUsage string                       `json:"weekly_usage,omitempty"`
