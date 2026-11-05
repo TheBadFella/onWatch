@@ -7208,7 +7208,7 @@ function isProviderTelemetryEnabled(provider, accountID) {
     ? State.providerVisibility
     : {};
 
-  if ((provider === 'codex' || provider === 'minimax') && accountID != null) {
+  if ((provider === 'codex' || provider === 'minimax' || provider === 'antigravity') && accountID != null) {
     const accountKey = `${provider}:${accountID}`;
     const accountVis = visibility[accountKey];
     if (accountVis && typeof accountVis === 'object' && accountVis.polling === false) {
@@ -7314,6 +7314,10 @@ function buildAllProviderEntries() {
     }
     if (key === 'minimax' || key === 'minimaxAccounts') {
       providerSet.add('minimax');
+      return;
+    }
+    if (key === 'antigravity' || key === 'antigravityAccounts') {
+      providerSet.add('antigravity');
       return;
     }
     if (bothProviderNames[key]) {
@@ -7478,6 +7482,51 @@ function buildAllProviderEntries() {
             ? historyPayload.history
             : (Array.isArray(history.minimax) ? history.minimax : []),
           historyErrorKey: `minimax:${accountID}`,
+        });
+      });
+      return;
+    }
+
+    if (provider === 'antigravity') {
+      const currentAccounts = Array.isArray(current.antigravityAccounts)
+        ? current.antigravityAccounts
+        : (current.antigravity ? [current.antigravity] : []);
+      if (currentAccounts.length === 0) return;
+
+      const insightAccounts = Array.isArray(insights.antigravityAccounts) ? insights.antigravityAccounts : [];
+      const historyAccounts = Array.isArray(history.antigravityAccounts) ? history.antigravityAccounts : [];
+
+      if (currentAccounts.length > 1) {
+        const groupAccounts = currentAccounts.filter((acc, idx) =>
+          isProviderTelemetryEnabled('antigravity', acc.accountId || acc.id || idx + 1));
+        if (groupAccounts.length === 0) return;
+        entries.push({
+          provider: 'antigravity',
+          cardKey: sanitizeProviderCardKey('antigravity'),
+          title: 'Antigravity',
+          badge: `${groupAccounts.length} accounts`,
+          accountsGroup: groupAccounts,
+        });
+        return;
+      }
+
+      currentAccounts.forEach((account, idx) => {
+        const accountID = account.accountId || account.id || idx + 1;
+        if (!isProviderTelemetryEnabled('antigravity', accountID)) return;
+        const accountName = account.accountName || account.name || `Account ${idx + 1}`;
+        const cardKey = sanitizeProviderCardKey(`antigravity-${accountID}`);
+        const insightPayload = insightAccounts.find(acc => String(acc.accountId || '') === String(accountID))
+          || insights.antigravity
+          || { stats: [], insights: [] };
+        const historyPayload = historyAccounts.find(acc => String(acc.accountId || '') === String(accountID));
+        entries.push({
+          provider: 'antigravity',
+          cardKey,
+          title: currentAccounts.length === 1 && accountName === 'default' ? 'Antigravity' : `Antigravity (${accountName})`,
+          badge: account.planName || null,
+          account,
+          insights: insightPayload,
+          history: historyPayload ? historyPayload.history : history.antigravity,
         });
       });
       return;

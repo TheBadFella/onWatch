@@ -26,6 +26,8 @@ var (
 	ErrAntigravityNotAuthenticated = errors.New("antigravity: not authenticated")
 )
 
+const antigravityQuotaSummaryRPCPath = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+
 // AntigravityProcessInfo contains detected process information.
 type AntigravityProcessInfo struct {
 	PID                 int
@@ -224,6 +226,81 @@ func (c *AntigravityClient) FetchQuotas(ctx context.Context) (*AntigravityUserSt
 	}
 
 	return &quotaResp, nil
+}
+
+// FetchSnapshot retrieves quotas with the richest contract the endpoint
+// supports. It first tries RetrieveUserQuotaSummary (bucket-level quotas served
+// by agy and agy-bridge) and falls back to GetUserStatus (model configs) when
+// that endpoint is unavailable.
+func (c *AntigravityClient) FetchSnapshot(ctx context.Context) (*AntigravitySnapshot, error) {
+	conn, err := c.Detect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := conn.BaseURL + antigravityQuotaSummaryRPCPath
+	summary, status, err := c.postRPC(ctx, conn, endpoint, agyMetadataBody)
+	if err == nil && status == http.StatusOK {
+		if models, parseErr := ParseAgyQuotaSummary(summary); parseErr == nil {
+			snap := &AntigravitySnapshot{
+				CapturedAt: time.Now().UTC(),
+				Source:     AntigravitySourceCLI,
+				Models:     models,
+				RawJSON:    string(summary),
+			}
+			// Identity/plan are best-effort; the quota summary already succeeded.
+			if resp, fetchErr := c.FetchQuotas(ctx); fetchErr == nil && resp.UserStatus != nil {
+				snap.Email = resp.UserStatus.Email
+				if ps := resp.UserStatus.PlanStatus; ps != nil {
+					snap.PromptCredits = ps.AvailablePromptCredits
+					if ps.PlanInfo != nil {
+						snap.PlanName = ps.PlanInfo.PlanName
+						snap.MonthlyCredits = ps.PlanInfo.MonthlyPromptCredits
+					}
+				}
+			}
+			return snap, nil
+		}
+	}
+
+	resp, fetchErr := c.FetchQuotas(ctx)
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+	snap := resp.ToSnapshot(time.Now().UTC())
+	snap.Source = AntigravitySourceIDE
+	return snap, nil
+}
+
+// postRPC issues a Connect-RPC POST against a language-server endpoint.
+func (c *AntigravityClient) postRPC(ctx context.Context, conn *AntigravityConnection, endpoint, body string) ([]byte, int, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("antigravity: creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+	if conn.CSRFToken != "" {
+		req.Header.Set("X-Codeium-Csrf-Token", conn.CSRFToken)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
+		return nil, 0, fmt.Errorf("%w: %v", ErrAntigravityConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	out, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("%w: reading body: %v", ErrAntigravityInvalidResponse, err)
+	}
+	return out, resp.StatusCode, nil
 }
 
 // IsConnected returns true if a valid connection exists.

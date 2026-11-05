@@ -295,14 +295,17 @@ func (a *AntigravityAgent) fetchCLI(ctx context.Context) (*api.AntigravitySnapsh
 	return a.cliRunner.Fetch(ctx)
 }
 
-// fetchIDE probes the desktop/IDE language server (the original behavior).
+// fetchIDE probes the desktop/IDE language server (or a bridge endpoint).
 func (a *AntigravityAgent) fetchIDE(ctx context.Context) (*api.AntigravitySnapshot, error) {
-	resp, err := a.client.FetchQuotas(ctx)
+	snap, err := a.client.FetchSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	snap := resp.ToSnapshot(time.Now().UTC())
-	snap.Source = api.AntigravitySourceIDE
+	// A bridge that exposes RetrieveUserQuotaSummary yields CLI-style buckets;
+	// keep that source so the dashboard renders bucket rows, not IDE groups.
+	if snap.Source != api.AntigravitySourceCLI {
+		snap.Source = api.AntigravitySourceIDE
+	}
 	return snap, nil
 }
 

@@ -147,6 +147,128 @@ func TestAntigravityClient_FetchQuotas_ServerError(t *testing.T) {
 	}
 }
 
+func TestAntigravityClient_FetchSnapshot_QuotaSummary(t *testing.T) {
+	resetTime := time.Now().Add(5 * time.Hour).Format(time.RFC3339)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/RetrieveUserQuotaSummary"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"response": map[string]interface{}{
+					"groups": []map[string]interface{}{
+						{
+							"displayName": "Gemini models",
+							"buckets": []map[string]interface{}{
+								{"bucketId": "gemini-5h", "displayName": "5h Limit", "remainingFraction": 0.5, "resetTime": resetTime},
+								{"bucketId": "gemini-weekly", "displayName": "Weekly Limit", "remainingFraction": 0.8, "resetTime": resetTime},
+							},
+						},
+						{
+							"displayName": "Claude + GPT models",
+							"buckets": []map[string]interface{}{
+								{"bucketId": "3p-5h", "displayName": "5h Limit", "remainingFraction": 0.75, "resetTime": resetTime},
+								{"bucketId": "3p-weekly", "displayName": "Weekly Limit", "remainingFraction": 0.9, "resetTime": resetTime},
+							},
+						},
+					},
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/GetUserStatus"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"userStatus": map[string]interface{}{
+					"email": "second@example.com",
+					"planStatus": map[string]interface{}{
+						"availablePromptCredits": 500,
+						"planInfo": map[string]interface{}{
+							"planName":             "Pro",
+							"monthlyPromptCredits": 1000,
+						},
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	conn := &AntigravityConnection{BaseURL: server.URL, CSRFToken: "test-csrf-token", Protocol: "http"}
+	client := NewAntigravityClient(slog.Default(), WithAntigravityConnection(conn))
+
+	snap, err := client.FetchSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("FetchSnapshot failed: %v", err)
+	}
+	if snap.Source != AntigravitySourceCLI {
+		t.Errorf("Source = %q, want %q", snap.Source, AntigravitySourceCLI)
+	}
+	if len(snap.Models) != 4 {
+		t.Fatalf("Models = %d, want 4", len(snap.Models))
+	}
+	gotIDs := []string{}
+	for _, m := range snap.Models {
+		gotIDs = append(gotIDs, m.ModelID)
+	}
+	wantIDs := []string{"gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly"}
+	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+		t.Errorf("bucket IDs = %v, want %v", gotIDs, wantIDs)
+	}
+	if snap.Email != "second@example.com" {
+		t.Errorf("Email = %q, want second@example.com", snap.Email)
+	}
+	if snap.PlanName != "Pro" {
+		t.Errorf("PlanName = %q, want Pro", snap.PlanName)
+	}
+}
+
+func TestAntigravityClient_FetchSnapshot_FallsBackToUserStatus(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/RetrieveUserQuotaSummary") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"userStatus": map[string]interface{}{
+				"email": "ide@example.com",
+				"cascadeModelConfigData": map[string]interface{}{
+					"clientModelConfigs": []map[string]interface{}{
+						{
+							"label":        "Claude Sonnet",
+							"modelOrAlias": map[string]string{"model": "claude-4-5-sonnet"},
+							"quotaInfo":    map[string]interface{}{"remainingFraction": 0.75},
+						},
+					},
+				},
+			},
+		})
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	conn := &AntigravityConnection{BaseURL: server.URL, Protocol: "http"}
+	client := NewAntigravityClient(slog.Default(), WithAntigravityConnection(conn))
+
+	snap, err := client.FetchSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("FetchSnapshot failed: %v", err)
+	}
+	if snap.Source != AntigravitySourceIDE {
+		t.Errorf("Source = %q, want %q", snap.Source, AntigravitySourceIDE)
+	}
+	if len(snap.Models) != 1 || snap.Models[0].ModelID != "claude-4-5-sonnet" {
+		t.Fatalf("Models = %+v, want one claude-4-5-sonnet quota", snap.Models)
+	}
+	if snap.Email != "ide@example.com" {
+		t.Errorf("Email = %q, want ide@example.com", snap.Email)
+	}
+}
+
 func TestAntigravityClient_IsConnected(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 

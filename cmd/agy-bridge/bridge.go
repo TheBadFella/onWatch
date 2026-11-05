@@ -16,34 +16,40 @@ const (
 	// userStatusPath is the Connect-RPC endpoint onWatch polls for one
 	// Antigravity account.
 	userStatusPath = "/exa.language_server_pb.LanguageServerService/GetUserStatus"
-	csrfHeader     = "X-Codeium-Csrf-Token"
+	// quotaSummaryPath exposes the bucket-level quotas (Gemini 5h/weekly,
+	// Claude + GPT 5h/weekly) so a bridge account matches the default account.
+	quotaSummaryPath = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
+	csrfHeader       = "X-Codeium-Csrf-Token"
 
 	// bridgeCacheTTL keeps a successful upstream response in memory long
 	// enough to absorb repeated polling without tripping upstream rate limits.
 	bridgeCacheTTL = 45 * time.Second
 )
 
-// userStatusSource fetches the upstream GetUserStatus payload.
-type userStatusSource interface {
+// bridgeSource fetches the upstream payloads the bridge exposes.
+type bridgeSource interface {
 	FetchUserStatus(ctx context.Context) ([]byte, error)
+	FetchQuotaSummary(ctx context.Context) ([]byte, error)
 }
 
-// bridge serves the Antigravity GetUserStatus contract from one managed agy
+// bridge serves the Antigravity language-server contracts from one managed agy
 // profile. Responses are cached in memory so onWatch can poll frequently
 // without re-launching or re-reading the upstream account.
 type bridge struct {
-	source    userStatusSource
+	source    bridgeSource
 	csrfToken string
 	cacheTTL  time.Duration
 	logger    *slog.Logger
 	now       func() time.Time
 
-	mu       sync.Mutex
-	cached   []byte
-	cachedAt time.Time
+	mu              sync.Mutex
+	cached          []byte
+	cachedAt        time.Time
+	cachedSummary   []byte
+	cachedSummaryAt time.Time
 }
 
-func newBridge(source userStatusSource, csrfToken string, logger *slog.Logger) *bridge {
+func newBridge(source bridgeSource, csrfToken string, logger *slog.Logger) *bridge {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -59,10 +65,29 @@ func newBridge(source userStatusSource, csrfToken string, logger *slog.Logger) *
 func (b *bridge) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(userStatusPath, b.handleUserStatus)
+	mux.HandleFunc(quotaSummaryPath, b.handleQuotaSummary)
 	return mux
 }
 
 func (b *bridge) handleUserStatus(w http.ResponseWriter, r *http.Request) {
+	b.serveCached(w, r, "GetUserStatus", &b.cached, &b.cachedAt, b.source.FetchUserStatus)
+}
+
+func (b *bridge) handleQuotaSummary(w http.ResponseWriter, r *http.Request) {
+	b.serveCached(w, r, "RetrieveUserQuotaSummary", &b.cachedSummary, &b.cachedSummaryAt, b.source.FetchQuotaSummary)
+}
+
+// serveCached validates the request, then serves the cached upstream body or
+// fetches it. The lock is held across the fetch so concurrent polls share one
+// upstream request instead of stampeding the runner.
+func (b *bridge) serveCached(
+	w http.ResponseWriter,
+	r *http.Request,
+	upstream string,
+	cached *[]byte,
+	cachedAt *time.Time,
+	fetch func(context.Context) ([]byte, error),
+) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		writeBridgeError(w, http.StatusMethodNotAllowed, "invalid_argument", "method not allowed")
@@ -76,32 +101,30 @@ func (b *bridge) handleUserStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Hold the lock across the fetch so concurrent polls share one upstream
-	// request instead of stampeding the runner.
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	now := b.now()
-	if b.cached != nil && now.Sub(b.cachedAt) < b.cacheTTL {
-		writeBridgeJSON(w, http.StatusOK, b.cached)
+	if *cached != nil && now.Sub(*cachedAt) < b.cacheTTL {
+		writeBridgeJSON(w, http.StatusOK, *cached)
 		return
 	}
 
-	body, err := b.source.FetchUserStatus(r.Context())
+	body, err := fetch(r.Context())
 	if err != nil {
-		b.logger.Warn("upstream GetUserStatus failed", "error", err)
-		writeBridgeError(w, http.StatusServiceUnavailable, "unavailable", "upstream GetUserStatus failed")
+		b.logger.Warn("upstream "+upstream+" failed", "error", err)
+		writeBridgeError(w, http.StatusServiceUnavailable, "unavailable", "upstream "+upstream+" failed")
 		return
 	}
 	if !json.Valid(body) {
-		b.logger.Warn("upstream GetUserStatus returned invalid JSON")
+		b.logger.Warn("upstream " + upstream + " returned invalid JSON")
 		writeBridgeError(w, http.StatusServiceUnavailable, "unavailable", "upstream returned invalid JSON")
 		return
 	}
 
-	b.cached = append(b.cached[:0], body...)
-	b.cachedAt = now
-	writeBridgeJSON(w, http.StatusOK, b.cached)
+	*cached = append((*cached)[:0], body...)
+	*cachedAt = now
+	writeBridgeJSON(w, http.StatusOK, *cached)
 }
 
 func writeBridgeJSON(w http.ResponseWriter, status int, body []byte) {

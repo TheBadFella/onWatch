@@ -248,6 +248,34 @@ func (r *AntigravityCLIRunner) FetchUserStatus(ctx context.Context) ([]byte, err
 	return body, nil
 }
 
+// FetchQuotaSummary ensures a ready agy session and returns the raw
+// RetrieveUserQuotaSummary body. The sidecar bridge serves this payload to
+// onWatch so a second account reports the same bucket-level quotas as the
+// default account.
+func (r *AntigravityCLIRunner) FetchQuotaSummary(ctx context.Context) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.ensureLocked(ctx); err != nil {
+		r.recordFailureLocked()
+		return nil, err
+	}
+
+	body, status, err := r.post(ctx, r.sess.conn, agyQuotaSummaryRPC)
+	if err != nil || status != http.StatusOK {
+		r.recordFailureLocked()
+		if err == nil {
+			err = fmt.Errorf("antigravity cli: quota summary returned status %d", status)
+		}
+		return nil, err
+	}
+
+	r.failures = 0
+	r.lastUsed = time.Now()
+	r.startWatchdog()
+	return body, nil
+}
+
 // ensureLocked guarantees a live, responsive session, relaunching if needed.
 // Caller must hold r.mu.
 func (r *AntigravityCLIRunner) ensureLocked(ctx context.Context) error {
