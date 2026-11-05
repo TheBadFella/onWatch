@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -237,6 +238,12 @@ func TestAntigravityAgent_CLIPreferenceOverridesManualBridge(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		// This bridge only implements GetUserStatus; the quota summary probe
+		// must fall back instead of failing the poll.
+		if strings.HasSuffix(r.URL.Path, "RetrieveUserQuotaSummary") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(antigravityTestResponse()))
 	}))
@@ -256,7 +263,8 @@ func TestAntigravityAgent_CLIPreferenceOverridesManualBridge(t *testing.T) {
 		t.Fatal("CLI-only selection contacted the IDE bridge")
 	}
 	snapshot, err := ag.fetchSnapshot(context.Background(), api.AntigravitySourceBoth)
-	if err != nil || snapshot == nil || snapshot.Source != api.AntigravitySourceIDE || requests.Load() != 1 {
+	// One probe for RetrieveUserQuotaSummary plus the GetUserStatus fallback.
+	if err != nil || snapshot == nil || snapshot.Source != api.AntigravitySourceIDE || requests.Load() != 2 {
 		t.Fatalf("both should fall back to the manual IDE bridge: snapshot=%v err=%v requests=%d", snapshot, err, requests.Load())
 	}
 }

@@ -51,3 +51,51 @@ test('Antigravity overview quotas normalize CLI buckets and IDE model groups',()
  assert.equal(rows[2].label,'Quota');
  assert.equal(rows[2].remaining,90);
 });
+function buildAllEntries(current,insights,history,configuredOrder){
+ const State={allProvidersCurrent:current,allProvidersInsights:insights,allProvidersHistory:history};
+ const c=vm.createContext({
+  State,
+  bothProviderNames:{antigravity:'Antigravity'},
+  getBothViewProviders:()=>configuredOrder,
+  sanitizeProviderCardKey:value=>String(value||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,''),
+  isProviderTelemetryEnabled:()=>true,
+  toTitleCase:value=>String(value||''),
+  peakMetaForProvider:()=>null,
+  normalizeBothQuotas:()=>[],
+  formatCodexPlan:()=> '',
+ });
+ vm.runInContext(extract('buildAllProviderEntries'),c);
+ return JSON.parse(JSON.stringify(c.buildAllProviderEntries()));
+}
+test('buildAllProviderEntries groups multiple Antigravity accounts into one card',()=>{
+ const accounts=[
+  {accountId:1,accountName:'default',planName:'Pro',quotas:[{modelId:'gemini-5h'}]},
+  {accountId:2,accountName:'Work',planName:'Pro',quotas:[{modelId:'3p-5h'}]},
+ ];
+ const entries=buildAllEntries({antigravityAccounts:accounts},{}, {}, []);
+ assert.equal(entries.length,1);
+ const entry=entries[0];
+ assert.equal(entry.provider,'antigravity');
+ assert.equal(entry.cardKey,'antigravity');
+ assert.equal(entry.title,'Antigravity');
+ assert.equal(entry.badge,'2 accounts');
+ assert.equal(entry.accountsGroup.length,2);
+ assert.equal(entry.accountsGroup[1].accountName,'Work');
+});
+test('buildAllProviderEntries renders a single Antigravity account card',()=>{
+ const entries=buildAllEntries(
+  {antigravity:{accountId:1,accountName:'default',planName:'Pro',quotas:[{modelId:'gemini-5h'}]}},
+  {antigravity:{stats:[],insights:[]}},
+  {antigravity:[]},
+  ['antigravity']
+ );
+ assert.equal(entries.length,1);
+ const entry=entries[0];
+ assert.equal(entry.provider,'antigravity');
+ assert.equal(entry.cardKey,'antigravity-1');
+ assert.equal(entry.title,'Antigravity');
+ assert.equal(entry.badge,'Pro');
+ assert.equal(entry.account.accountName,'default');
+ assert.deepEqual(entry.insights,{stats:[],insights:[]});
+ assert.deepEqual(entry.history,[]);
+});

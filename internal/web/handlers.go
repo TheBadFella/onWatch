@@ -3197,7 +3197,23 @@ func (h *Handler) currentBoth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if h.config.HasProvider("antigravity") && providerTelemetryEnabled(visibility, "antigravity") {
-		response["antigravity"] = h.buildAntigravityCurrent(h.parseAntigravityAccountID(r))
+		antigravityAccounts := h.antigravityUsageAccounts()
+		originalAccountCount := len(antigravityAccounts)
+		filteredAccounts := make([]map[string]interface{}, 0, len(antigravityAccounts))
+		for _, acc := range antigravityAccounts {
+			accountID := antigravityUsageAccountID(acc)
+			if antigravityAccountTelemetryEnabled(visibility, accountID) {
+				filteredAccounts = append(filteredAccounts, acc)
+			}
+		}
+		antigravityAccounts = filteredAccounts
+		if len(antigravityAccounts) > 1 {
+			response["antigravityAccounts"] = antigravityAccounts
+		} else if len(antigravityAccounts) == 1 {
+			response["antigravity"] = antigravityAccounts[0]
+		} else if originalAccountCount == 0 {
+			response["antigravity"] = h.buildAntigravityCurrent(h.defaultAntigravityAccountID())
+		}
 	}
 	if h.config.HasProvider("minimax") && providerTelemetryEnabled(visibility, "minimax") {
 		minimaxAccounts := h.minimaxUsageAccounts()
@@ -3860,10 +3876,25 @@ func (h *Handler) historyBoth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.config.HasProvider("antigravity") && providerTelemetryEnabled(visibility, "antigravity") && h.store != nil {
-		snapshots, err := h.store.QueryAntigravityRangeSampled(start, now, h.parseAntigravityAccountID(r))
-		if err != nil {
-			historyErrors["antigravity"] = "history read failed"
-		} else {
+		antigravityUsages, enumerated := h.antigravityUsageAccountsOK()
+		if !enumerated {
+			historyErrors["antigravity"] = "failed to list accounts"
+		}
+		antigravityAccounts := make([]map[string]interface{}, 0, len(antigravityUsages))
+		for _, usage := range antigravityUsages {
+			antigravityAccounts = append(antigravityAccounts, usage.Usage)
+		}
+		antigravityHistories := make([]map[string]interface{}, 0, len(antigravityAccounts))
+		for _, acc := range antigravityAccounts {
+			accountID := antigravityUsageAccountID(acc)
+			if !antigravityAccountTelemetryEnabled(visibility, accountID) {
+				continue
+			}
+			snapshots, err := h.store.QueryAntigravityRangeSampled(start, now, accountID)
+			if err != nil {
+				historyErrors[fmt.Sprintf("antigravity:%d", accountID)] = "history read failed"
+				continue
+			}
 			step := downsampleStep(len(snapshots), maxChartPoints)
 			last := len(snapshots) - 1
 			antData := make([]map[string]interface{}, 0, min(len(snapshots), maxChartPoints))
@@ -3879,7 +3910,20 @@ func (h *Handler) historyBoth(w http.ResponseWriter, r *http.Request) {
 				}
 				antData = append(antData, entry)
 			}
-			response["antigravity"] = antData
+			antigravityHistories = append(antigravityHistories, map[string]interface{}{
+				"accountId":   accountID,
+				"accountName": antigravityUsageAccountName(acc),
+				"history":     antData,
+			})
+		}
+
+		if len(antigravityHistories) == 1 {
+			if single, ok := antigravityHistories[0]["history"]; ok {
+				response["antigravity"] = single
+			}
+		}
+		if len(antigravityHistories) > 0 {
+			response["antigravityAccounts"] = antigravityHistories
 		}
 	}
 
@@ -6122,7 +6166,28 @@ func (h *Handler) insightsBoth(w http.ResponseWriter, r *http.Request, rangeDur 
 		}
 	}
 	if h.config.HasProvider("antigravity") && providerTelemetryEnabled(visibility, "antigravity") {
-		response["antigravity"] = h.buildAntigravityInsights(hidden, rangeDur)
+		antigravityAccounts := h.antigravityUsageAccounts()
+		antigravityInsights := make([]map[string]interface{}, 0, len(antigravityAccounts))
+		for _, acc := range antigravityAccounts {
+			accountID := antigravityUsageAccountID(acc)
+			if !antigravityAccountTelemetryEnabled(visibility, accountID) {
+				continue
+			}
+			ins := h.buildAntigravityInsights(hidden, rangeDur, accountID)
+			partial = partial || ins.partial
+			antigravityInsights = append(antigravityInsights, map[string]interface{}{
+				"accountId":   accountID,
+				"accountName": antigravityUsageAccountName(acc),
+				"stats":       ins.Stats,
+				"insights":    ins.Insights,
+			})
+		}
+		if len(antigravityInsights) == 1 {
+			response["antigravity"] = antigravityInsights[0]
+		}
+		if len(antigravityInsights) > 0 {
+			response["antigravityAccounts"] = antigravityInsights
+		}
 	}
 	if h.config.HasProvider("minimax") && providerTelemetryEnabled(visibility, "minimax") {
 		minimaxAccounts := h.minimaxUsageAccounts()
@@ -10854,6 +10919,54 @@ func (h *Handler) antigravityUsageAccountsOK() (accounts []menubarAccountUsage, 
 		accounts = append(accounts, menubarAccountUsage{Usage: usage, ReadOK: readOK, HasData: hasData})
 	}
 	return accounts, true
+}
+
+// antigravityUsageAccounts returns current usage for all active Antigravity
+// accounts. Mirrors minimaxUsageAccounts().
+func (h *Handler) antigravityUsageAccounts() []map[string]interface{} {
+	usages, _ := h.antigravityUsageAccountsOK()
+	accounts := make([]map[string]interface{}, 0, len(usages))
+	for _, usage := range usages {
+		accounts = append(accounts, usage.Usage)
+	}
+	return accounts
+}
+
+func antigravityUsageAccountID(usage map[string]interface{}) int64 {
+	if usage == nil {
+		return 0
+	}
+	switch v := usage["accountId"].(type) {
+	case int64:
+		if v > 0 {
+			return v
+		}
+	case int:
+		if v > 0 {
+			return int64(v)
+		}
+	case float64:
+		if v > 0 {
+			return int64(v)
+		}
+	}
+	return 0
+}
+
+func antigravityUsageAccountName(usage map[string]interface{}) string {
+	if usage == nil {
+		return ""
+	}
+	name, _ := usage["accountName"].(string)
+	return name
+}
+
+func antigravityAccountTelemetryEnabled(visibility map[string]interface{}, accountID int64) bool {
+	accountKey := fmt.Sprintf("antigravity:%d", accountID)
+	if polling, exists := providerPollingValue(visibility[accountKey]); exists {
+		return polling
+	}
+	return providerTelemetryEnabled(visibility, "antigravity")
 }
 
 func minimaxUsageAccountID(usage map[string]interface{}) int64 {
