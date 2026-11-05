@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -146,18 +147,18 @@ func TestResolveAgyPath_EnvOverride(t *testing.T) {
 		t.Fatalf("write fake agy: %v", err)
 	}
 	t.Setenv("ANTIGRAVITY_CLI_PATH", fake)
-	got, err := resolveAgyPath()
+	got, err := ResolveAgyPath()
 	if err != nil {
-		t.Fatalf("resolveAgyPath: %v", err)
+		t.Fatalf("ResolveAgyPath: %v", err)
 	}
 	if got != fake {
-		t.Errorf("resolveAgyPath = %q, want %q", got, fake)
+		t.Errorf("ResolveAgyPath = %q, want %q", got, fake)
 	}
 }
 
 func TestResolveAgyPath_EnvMissingFileErrors(t *testing.T) {
 	t.Setenv("ANTIGRAVITY_CLI_PATH", filepath.Join(t.TempDir(), "does-not-exist"))
-	if _, err := resolveAgyPath(); err == nil {
+	if _, err := ResolveAgyPath(); err == nil {
 		t.Error("expected error when ANTIGRAVITY_CLI_PATH points at a missing file")
 	}
 }
@@ -197,5 +198,38 @@ func TestAgyLaunchArgs_PassCSRFToken(t *testing.T) {
 	args := agyLaunchArgs(a)
 	if len(args) != 2 || args[0] != "--csrf_token" || args[1] != a {
 		t.Fatalf("agyLaunchArgs(%q) = %q", a, args)
+	}
+}
+
+// TestAgyLaunchEnvironment_OverridesWin verifies that a profile isolation
+// override replaces the inherited value, because os/exec keeps the last entry
+// for a duplicated environment key.
+func TestAgyLaunchEnvironment_OverridesWin(t *testing.T) {
+	base := []string{"HOME=/default-home", "XDG_CONFIG_HOME=/default-config", "PATH=/usr/bin"}
+	env := agyLaunchEnvironment(base, map[string]string{
+		"HOME":            "/profile-two",
+		"XDG_CONFIG_HOME": "/profile-two/.config",
+	})
+
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		values[key] = value
+	}
+
+	if values["HOME"] != "/profile-two" {
+		t.Errorf("HOME = %q, want override", values["HOME"])
+	}
+	if values["XDG_CONFIG_HOME"] != "/profile-two/.config" {
+		t.Errorf("XDG_CONFIG_HOME = %q, want override", values["XDG_CONFIG_HOME"])
+	}
+	if values["PATH"] != "/usr/bin" {
+		t.Errorf("PATH = %q, want inherited value", values["PATH"])
+	}
+	if values["TERM"] != "xterm-256color" {
+		t.Errorf("TERM = %q, want xterm-256color", values["TERM"])
 	}
 }

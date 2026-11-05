@@ -108,7 +108,8 @@ function providerParam() {
 // (sessions/cycles/overview/insights) do not apply in this mode.
 function isAccountsOverviewMode(provider = getCurrentProvider()) {
   return (provider === 'codex' && State.codexAccount === 'all') ||
-         (provider === 'minimax' && State.minimaxAccount === 'all');
+         (provider === 'minimax' && State.minimaxAccount === 'all') ||
+         (provider === 'antigravity' && State.antigravityAccount === 'all');
 }
 
 function shouldShowSessionsTable(provider = getCurrentProvider()) {
@@ -658,7 +659,9 @@ function minimaxAccountParam() {
 function loadAntigravityAccount() {
   try {
     const stored = localStorage.getItem('onwatch-antigravity-account');
-    if (stored) {
+    if (stored === 'all') {
+      State.antigravityAccount = 'all';
+    } else if (stored) {
       const parsed = parseInt(stored, 10);
       State.antigravityAccount = isNaN(parsed) ? null : parsed;
     }
@@ -683,11 +686,12 @@ async function loadAntigravityAccounts() {
     const data = await res.json();
     const activeAccounts = (data.accounts || []).filter(a => !a.deletedAt);
     State.antigravityAccounts = activeAccounts;
-    if (!activeAccounts.length) State.antigravityAccount = null;
-    if (activeAccounts.length > 0) {
+    if (!activeAccounts.length) {
+      State.antigravityAccount = null;
+    } else if (State.antigravityAccount !== 'all') {
       const stored = State.antigravityAccount;
-      if (!stored || !activeAccounts.find(a => a.id === stored)) {
-        State.antigravityAccount = activeAccounts[0].id;
+      if (stored == null || !activeAccounts.find(a => a.id === stored)) {
+        State.antigravityAccount = activeAccounts.length > 1 ? 'all' : activeAccounts[0].id;
         saveAntigravityAccount(State.antigravityAccount);
       }
     }
@@ -699,7 +703,7 @@ async function loadAntigravityAccounts() {
 }
 
 function antigravityAccountParam() {
-  if (!State.antigravityAccount) return '';
+  if (!State.antigravityAccount || State.antigravityAccount === 'all') return '';
   return `&account=${encodeURIComponent(State.antigravityAccount)}`;
 }
 
@@ -714,6 +718,20 @@ function populateAntigravityAccountMenu() {
   }
 
   menu.innerHTML = '';
+
+  const allItem = document.createElement('li');
+  allItem.className = 'codex-profile-item' + (State.antigravityAccount === 'all' ? ' active' : '');
+  allItem.dataset.accountId = 'all';
+  allItem.textContent = 'All accounts';
+  allItem.setAttribute('role', 'option');
+  allItem.tabIndex = -1;
+  allItem.setAttribute('aria-selected', State.antigravityAccount === 'all' ? 'true' : 'false');
+  allItem.addEventListener('click', () => {
+    switchAntigravityAccount('all');
+    closeAntigravityAccountDropdown();
+  });
+  menu.appendChild(allItem);
+
   for (const account of State.antigravityAccounts) {
     const li = document.createElement('li');
     li.className = 'codex-profile-item' + (account.id === State.antigravityAccount ? ' active' : '');
@@ -751,14 +769,17 @@ function updateAntigravityAccountActive() {
   const label = document.getElementById('antigravity-profile-label');
   const menu = document.getElementById('antigravity-profile-menu');
   if (!menu) return;
+  const isAll = State.antigravityAccount === 'all';
   if (label) {
-    const active = (State.antigravityAccounts || []).find(a => a.id === State.antigravityAccount);
-    label.textContent = active ? active.name : 'Default account';
+    const active = isAll ? null : (State.antigravityAccounts || []).find(a => a.id === State.antigravityAccount);
+    label.textContent = isAll ? 'All accounts' : (active ? active.name : 'Default account');
     const heading = document.getElementById('antigravity-selected-account-name');
-    if (heading) heading.textContent = active ? active.name : 'Antigravity account';
+    if (heading) heading.textContent = isAll ? 'Antigravity accounts' : (active ? active.name : 'Antigravity account');
   }
   menu.querySelectorAll('.codex-profile-item').forEach(item => {
-    const isActive = parseInt(item.dataset.accountId, 10) === State.antigravityAccount;
+    const isActive = item.dataset.accountId === 'all'
+      ? isAll
+      : parseInt(item.dataset.accountId, 10) === State.antigravityAccount;
     item.classList.toggle('active', isActive);
     item.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
@@ -4934,10 +4955,12 @@ async function fetchCurrent(onlyIfChanged = false) {
         if (data.quotas) {
           const container = document.getElementById('quota-grid-antigravity');
           // The card set (count and ids) changes when the source switches between
-          // IDE groups and CLI buckets, so re-render whenever the ids don't match.
+          // IDE groups and CLI buckets, and the grid still holds overview cards
+          // after leaving "All accounts" mode, so re-render when either differs.
           const existingIds = container ? [...container.children].map(c => c.dataset.quota).join(',') : '';
           const incomingIds = data.quotas.map(q => q.modelId).join(',');
-          if (container && (container.children.length === 0 || existingIds !== incomingIds)) {
+          const hasOverviewCards = container && container.querySelector('.account-overview-card');
+          if (container && (hasOverviewCards || container.children.length === 0 || existingIds !== incomingIds)) {
             renderAntigravityQuotaCards(data.quotas, 'quota-grid-antigravity');
           }
           data.quotas.forEach(q => updateAntigravityCard(q));
@@ -5175,6 +5198,20 @@ function minimaxWindowLabel(q) {
 // Normalize an account's quotas into compact {label, percent, status, resetAt}
 // rows, keeping only the windows the account actually reports.
 function accountOverviewQuotas(provider, account) {
+  if (provider === 'antigravity') {
+    // Antigravity reports either agy CLI buckets or IDE logical model groups;
+    // both use the same quota fields.
+    return (account.quotas || []).map(q => ({
+      label: q.displayName || q.label || q.modelId || q.quotaGroup || 'Quota',
+      quotaName: q.modelId || q.quotaGroup || null,
+      percent: typeof q.usagePercent === 'number' ? q.usagePercent : 0,
+      status: q.status || 'healthy',
+      resetAt: q.resetTime || null,
+      remaining: typeof q.remainingPercent === 'number'
+        ? q.remainingPercent
+        : (typeof q.usagePercent === 'number' ? Math.max(0, 100 - q.usagePercent) : null),
+    }));
+  }
   if (provider === 'minimax') {
     return (account.quotas || []).map(q => ({
       label: minimaxWindowLabel(q),
@@ -5263,6 +5300,7 @@ function renderAccountsOverview(provider, accounts) {
   if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
   const drill = (accountId) => {
     if (provider === 'minimax') switchMiniMaxAccount(accountId);
+    else if (provider === 'antigravity') switchAntigravityAccount(accountId);
     else switchCodexProfile(accountId);
   };
   container.querySelectorAll('.account-overview-card').forEach(card => {
@@ -5277,7 +5315,9 @@ function renderAccountsOverview(provider, accounts) {
 async function fetchAccountsOverview(provider, requestSeq, onlyIfChanged = false) {
   const endpoint = provider === 'minimax'
     ? `${API_BASE}/api/minimax/accounts/usage`
-    : `${API_BASE}/api/codex/accounts/usage`;
+    : (provider === 'antigravity'
+      ? `${API_BASE}/api/antigravity/accounts/usage`
+      : `${API_BASE}/api/codex/accounts/usage`);
   try {
     const res = await authFetch(endpoint);
     if (!res.ok) throw new Error('Failed to fetch account usage');
@@ -5311,6 +5351,7 @@ function overviewAccounts(provider) {
     return State.accountsOverview.accounts.map(a => ({ id: a.accountId || a.id, name: a.accountName || a.name }));
   }
   if (provider === 'minimax') return (State.minimaxAccounts || []).map(a => ({ id: a.id, name: a.name }));
+  if (provider === 'antigravity') return (State.antigravityAccounts || []).map(a => ({ id: a.id, name: a.name }));
   return (State.codexProfiles || []).map(p => ({ id: p.id, name: p.name }));
 }
 
@@ -8084,143 +8125,209 @@ function providerHistoryStaleMark(entry) {
   return `<span class="provider-chart-stale-dot chart-stale-dot stale" role="img" title="${label}" aria-label="${label}"></span>`;
 }
 
-function renderAllProvidersView() {
-  const container = document.getElementById('all-providers-container');
-  if (!container) return;
-
-  const entries = buildAllProviderEntries();
-  const collapsedState = loadProviderCardCollapseState();
-  destroyProviderCardCharts();
-
-  if (entries.length === 0) {
-    container.innerHTML = '<p class="insight-text">No provider data available yet.</p>';
-    return;
+// Build the markup for one provider card in the All view. Kept separate so the
+// view can patch existing cards from a template instead of replacing the
+// container's innerHTML on every poll.
+function renderProviderCardEntryHTML(entry, collapsed) {
+  const badge = entry.badge ? `<span class="provider-card-badge">${escapeHTML(entry.badge)}</span>` : '';
+  // The first KPI card carries the chip. Only a provider without KPI cards
+  // (balance providers such as DeepSeek) needs it in the header instead.
+  const hasKpiChip = Array.isArray(entry.quotas) && entry.quotas.length > 0;
+  const peak = entry.peakMeta && !hasKpiChip && window.OnWatchPeak
+    ? window.OnWatchPeak.peakChipMarkup(entry.peakMeta)
+    : '';
+  const hasChartData = Array.isArray(entry.historyRows) && entry.historyRows.length > 0;
+  const chartSection = hasChartData
+    ? `<div class="provider-chart">
+        <canvas id="provider-chart-${entry.cardKey}"></canvas>
+      </div>`
+    : `<div class="provider-chart provider-chart-empty">
+        <p class="insight-text">Collecting data...</p>
+      </div>`;
+  if (entry.summaryOnly) {
+    return renderAPIIntegrationsSummaryCard(entry, collapsed);
   }
-
-  container.innerHTML = entries.map((entry) => {
-    const collapsed = Boolean(collapsedState[entry.cardKey]);
-    const badge = entry.badge ? `<span class="provider-card-badge">${escapeHTML(entry.badge)}</span>` : '';
-    // The first KPI card carries the chip. Only a provider without KPI cards
-    // (balance providers such as DeepSeek) needs it in the header instead.
-    const hasKpiChip = Array.isArray(entry.quotas) && entry.quotas.length > 0;
-    const peak = entry.peakMeta && !hasKpiChip && window.OnWatchPeak
-      ? window.OnWatchPeak.peakChipMarkup(entry.peakMeta)
-      : '';
-    const hasChartData = Array.isArray(entry.historyRows) && entry.historyRows.length > 0;
-    const chartSection = hasChartData
-      ? `<div class="provider-chart">
-          <canvas id="provider-chart-${entry.cardKey}"></canvas>
-        </div>`
-      : `<div class="provider-chart provider-chart-empty">
-          <p class="insight-text">Collecting data...</p>
-        </div>`;
-    if (entry.summaryOnly) {
-      return renderAPIIntegrationsSummaryCard(entry, collapsed);
-    }
-    const staleMark = providerHistoryStaleMark(entry);
-    const cardHeader = `<header class="provider-card-header">
-        <div class="provider-card-title">
-          <span>${escapeHTML(entry.title)}</span>
-          ${badge}${peak}${staleMark}
-        </div>
-        <div class="provider-card-actions">${providerResetHTML(entry)}
-        <button class="provider-card-collapse-btn" type="button" data-card-key="${entry.cardKey}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHTML(entry.title)}">
-          <svg class="provider-card-collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m9 6 6 6-6 6"/>
-          </svg>
-        </button></div>
-      </header>`;
-    if (Array.isArray(entry.accountsGroup)) {
-      const cards = entry.accountsGroup
-        .map((account, idx) => accountOverviewCardHTML(entry.provider, account, idx))
-        .join('');
-      return `<section class="provider-card ${collapsed ? 'collapsed' : ''}" data-card-key="${entry.cardKey}" data-provider="${entry.provider}">
-      ${cardHeader}
-      <div class="provider-card-body">
-        <div class="accounts-overview-grid">${cards}</div>
+  const staleMark = providerHistoryStaleMark(entry);
+  const cardHeader = `<header class="provider-card-header">
+      <div class="provider-card-title">
+        <span>${escapeHTML(entry.title)}</span>
+        ${badge}${peak}${staleMark}
       </div>
-    </section>`;
-    }
+      <div class="provider-card-actions">${providerResetHTML(entry)}
+      <button class="provider-card-collapse-btn" type="button" data-card-key="${entry.cardKey}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHTML(entry.title)}">
+        <svg class="provider-card-collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="m9 6 6 6-6 6"/>
+        </svg>
+      </button></div>
+    </header>`;
+  if (Array.isArray(entry.accountsGroup)) {
+    const cards = entry.accountsGroup
+      .map((account, idx) => accountOverviewCardHTML(entry.provider, account, idx))
+      .join('');
     return `<section class="provider-card ${collapsed ? 'collapsed' : ''}" data-card-key="${entry.cardKey}" data-provider="${entry.provider}">
-      ${cardHeader}
-      <div class="provider-card-body">
-        ${entry.provider === 'codex' ? codexUsageSourceNoteHTML(entry.usageSourceNote) : ''}
-        <div class="provider-kpis">${renderProviderKPIHTML(entry.quotas, entry.provider)}</div>
-        ${entry.provider === 'codex' || entry.provider === 'anthropic' ? `<div class="account-cost-slot" data-cost-provider="${entry.provider}" data-cost-account-id="${entry.accountId || ''}">${typeof costAccountHTML === 'function' ? costAccountHTML(entry.provider,entry.accountId || null) : ''}</div>` : ''}
-        ${entry.provider === "mistral" && entry.showBilling ? `<p>Pay-as-you-go: ${escapeHTML(mistralMoney(entry.billing?.amount,entry.billing?.currency))}</p>` : ""}
-        ${(() => {
-          const insightsHTML = renderProviderInsightsHTML(entry.provider, entry.insights);
-          return insightsHTML ? `<div class="provider-insights">${insightsHTML}</div>` : '';
-        })()}
-        ${chartSection}
-      </div>
-    </section>`;
-  }).join('');
+    ${cardHeader}
+    <div class="provider-card-body">
+      <div class="accounts-overview-grid">${cards}</div>
+    </div>
+  </section>`;
+  }
+  return `<section class="provider-card ${collapsed ? 'collapsed' : ''}" data-card-key="${entry.cardKey}" data-provider="${entry.provider}">
+    ${cardHeader}
+    <div class="provider-card-body">
+      ${entry.provider === 'codex' ? codexUsageSourceNoteHTML(entry.usageSourceNote) : ''}
+      <div class="provider-kpis">${renderProviderKPIHTML(entry.quotas, entry.provider)}</div>
+      ${entry.provider === 'codex' || entry.provider === 'anthropic' ? `<div class="account-cost-slot" data-cost-provider="${entry.provider}" data-cost-account-id="${entry.accountId || ''}">${typeof costAccountHTML === 'function' ? costAccountHTML(entry.provider,entry.accountId || null) : ''}</div>` : ''}
+      ${entry.provider === "mistral" && entry.showBilling ? `<p>Pay-as-you-go: ${escapeHTML(mistralMoney(entry.billing?.amount,entry.billing?.currency))}</p>` : ""}
+      ${(() => {
+        const insightsHTML = renderProviderInsightsHTML(entry.provider, entry.insights);
+        return insightsHTML ? `<div class="provider-insights">${insightsHTML}</div>` : '';
+      })()}
+      ${chartSection}
+    </div>
+  </section>`;
+}
 
-  if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
-  // Grouped multi-account cards in the All view navigate to the provider tab,
-  // pinning the clicked account as the active selection.
-  container.querySelectorAll('.accounts-overview-grid .account-overview-card').forEach((card) => {
-    const provider = card.dataset.provider;
-    const accountId = parseInt(card.dataset.accountId, 10);
-    const go = () => {
-      if (provider === 'minimax') saveMiniMaxAccount(accountId);
-      else saveCodexAccount(accountId);
-      saveDefaultProvider(provider);
-      window.location.href = `${BASE_PATH}/?provider=${provider}`;
-    };
-    card.addEventListener('click', event => {
-      if (!event.target.closest('[data-codex-connect]')) go();
-    });
-  });
+function destroyProviderCardChart(cardKey) {
+  const chart = State.providerCharts && State.providerCharts[cardKey];
+  if (chart && typeof chart.destroy === 'function') chart.destroy();
+  if (State.providerCharts) delete State.providerCharts[cardKey];
+}
 
-  container.querySelectorAll('.provider-card-collapse-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const cardKey = btn.dataset.cardKey;
+// Delegate clicks once per container so in-place card patches never accumulate
+// duplicate handlers.
+function bindAllProvidersViewEvents(container) {
+  if (!container || typeof container.addEventListener !== 'function') return;
+  if (container.dataset.providerCardsBound === '1') return;
+  container.dataset.providerCardsBound = '1';
+  container.addEventListener('click', (event) => {
+    const collapseBtn = event.target.closest('.provider-card-collapse-btn');
+    if (collapseBtn) {
+      const cardKey = collapseBtn.dataset.cardKey;
       const card = container.querySelector(`.provider-card[data-card-key="${cardKey}"]`);
       if (!card) return;
       card.classList.toggle('collapsed');
       const collapsed = card.classList.contains('collapsed');
-      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       const title = card.querySelector('.provider-card-title span')?.textContent || 'provider card';
-      btn.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${title}`);
+      collapseBtn.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${title}`);
+      const collapsedState = loadProviderCardCollapseState();
       collapsedState[cardKey] = collapsed;
       saveProviderCardCollapseState(collapsedState);
-    });
-  });
+      return;
+    }
 
-  container.querySelectorAll('.provider-card[data-api-integrations-link="true"]').forEach((card) => {
-    card.addEventListener('click', (event) => {
-      if (event.target.closest('.provider-card-collapse-btn')) return;
+    // Grouped multi-account cards navigate to the provider tab, pinning the
+    // clicked account as the active selection.
+    const accountCard = event.target.closest('.accounts-overview-grid .account-overview-card');
+    if (accountCard) {
+      if (event.target.closest('[data-codex-connect]')) return;
+      const provider = accountCard.dataset.provider;
+      const accountId = parseInt(accountCard.dataset.accountId, 10);
+      if (provider === 'minimax') saveMiniMaxAccount(accountId);
+      else if (provider === 'antigravity') saveAntigravityAccount(accountId);
+      else saveCodexAccount(accountId);
+      saveDefaultProvider(provider);
+      window.location.href = `${BASE_PATH}/?provider=${provider}`;
+      return;
+    }
+
+    const integrationCard = event.target.closest('.provider-card[data-api-integrations-link="true"]');
+    if (integrationCard) {
       saveDefaultProvider('api-integrations');
       window.location.href = '/?provider=api-integrations';
-    });
+    }
   });
+}
 
+// Update mini-charts without destroying the ones that are still valid, so an
+// unchanged card keeps its canvas (and no flash) across polls.
+function updateProviderCardCharts(entries, container) {
   const chartRange = State.currentRange || '6h';
   const colors = getThemeColors();
   entries.forEach((entry) => {
-    const chartHost = container.querySelector(`.provider-card[data-card-key="${entry.cardKey}"] .provider-chart`);
-    const canvas = container.querySelector(`#provider-chart-${entry.cardKey}`);
+    const card = container.querySelector(`.provider-card[data-card-key="${entry.cardKey}"]`);
+    const chartHost = card ? card.querySelector('.provider-chart') : null;
+    const canvas = card ? card.querySelector(`#provider-chart-${entry.cardKey}`) : null;
     const rows = Array.isArray(entry.historyRows) ? entry.historyRows : [];
-    if (!chartHost || !canvas) return;
+
+    if (!chartHost || !canvas) {
+      destroyProviderCardChart(entry.cardKey);
+      return;
+    }
 
     const datasets = buildProviderCardDatasets(entry.provider, rows, chartRange);
     if (!datasets.length) {
+      destroyProviderCardChart(entry.cardKey);
       chartHost.classList.add('provider-chart-empty');
       chartHost.innerHTML = '<p class="insight-text">Collecting data...</p>';
       return;
     }
 
     chartHost.classList.remove('provider-chart-empty');
+    const signature = `${chartRange}|${JSON.stringify(datasets)}`;
+    const existing = State.providerCharts && State.providerCharts[entry.cardKey];
 
+    if (existing && existing.canvas === canvas) {
+      if (existing.$onwatchSignature !== signature) {
+        existing.data.datasets = datasets;
+        existing.options.scales.y.max = computeYMax(datasets);
+        updateTimeScale(existing, chartRange);
+        existing.$onwatchSignature = signature;
+        existing.update();
+      }
+      return;
+    }
+
+    if (existing) existing.destroy();
     const chart = new Chart(canvas, {
       type: 'line',
       data: { datasets },
       options: buildChartOptions(colors, computeYMax(datasets), chartRange)
     });
+    chart.$onwatchSignature = signature;
     State.providerCharts[entry.cardKey] = chart;
   });
+}
+
+function renderAllProvidersView() {
+  const container = document.getElementById('all-providers-container');
+  if (!container) return;
+
+  const entries = buildAllProviderEntries();
+  const collapsedState = loadProviderCardCollapseState();
+
+  if (entries.length === 0) {
+    destroyProviderCardCharts();
+    container.innerHTML = '<p class="insight-text">No provider data available yet.</p>';
+    return;
+  }
+
+  const html = entries
+    .map((entry) => renderProviderCardEntryHTML(entry, Boolean(collapsedState[entry.cardKey])))
+    .join('');
+  const existingCards = [...container.children];
+  const expectedKeys = entries.map(entry => entry.cardKey).join('|');
+  const currentKeys = existingCards.map(card => card.dataset.cardKey || '').join('|');
+  // The card list is stable across polls, so patch it in place. A changed card
+  // set (provider added, removed or reordered) still needs a full render.
+  const canPatch = existingCards.length === entries.length && currentKeys === expectedKeys;
+
+  bindAllProvidersViewEvents(container);
+
+  if (canPatch) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const nextCards = [...template.content.children];
+    entries.forEach((entry, idx) => {
+      if (nextCards[idx]) patchOverviewNode(existingCards[idx], nextCards[idx]);
+    });
+  } else {
+    destroyProviderCardCharts();
+    container.innerHTML = html;
+  }
+
+  updateProviderCardCharts(entries, container);
+  if (typeof window !== 'undefined') window.OnWatchCosts?.refresh();
 }
 
 // ── "Both" Mode: Dual Charts (legacy fallback) ──

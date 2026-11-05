@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -54,9 +55,11 @@ type agySession struct {
 // relaunched on failure, and reaped on shutdown. Only the process this runner
 // launched is ever killed - a user's own interactive agy is never touched.
 type AntigravityCLIRunner struct {
-	logger  *slog.Logger
-	client  *AntigravityClient
-	warmTTL time.Duration
+	logger     *slog.Logger
+	client     *AntigravityClient
+	warmTTL    time.Duration
+	binaryPath string
+	launchEnv  map[string]string
 
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
@@ -68,25 +71,52 @@ type AntigravityCLIRunner struct {
 	watchdog sync.Once
 }
 
+// AntigravityCLIRunnerOption configures a managed agy runner.
+type AntigravityCLIRunnerOption func(*AntigravityCLIRunner)
+
+// WithAgyBinaryPath pins the agy executable instead of resolving it from the
+// environment and PATH.
+func WithAgyBinaryPath(path string) AntigravityCLIRunnerOption {
+	return func(r *AntigravityCLIRunner) {
+		r.binaryPath = path
+	}
+}
+
+// WithAgyLaunchEnv adds environment variables for the managed agy process.
+// Overrides take precedence over the inherited process environment, which lets
+// a caller isolate the CLI's credential store in a separate profile.
+func WithAgyLaunchEnv(env map[string]string) AntigravityCLIRunnerOption {
+	return func(r *AntigravityCLIRunner) {
+		r.launchEnv = make(map[string]string, len(env))
+		for k, v := range env {
+			r.launchEnv[k] = v
+		}
+	}
+}
+
 // NewAntigravityCLIRunner creates a runner. It does not launch agy until the
-// first Fetch call.
-func NewAntigravityCLIRunner(logger *slog.Logger) *AntigravityCLIRunner {
+// first fetch call.
+func NewAntigravityCLIRunner(logger *slog.Logger, opts ...AntigravityCLIRunnerOption) *AntigravityCLIRunner {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &AntigravityCLIRunner{
+	r := &AntigravityCLIRunner{
 		logger:     logger.With("component", "antigravity-cli"),
 		client:     NewAntigravityClient(logger),
 		warmTTL:    agyDefaultWarmTTL,
 		rootCtx:    ctx,
 		rootCancel: cancel,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
-// resolveAgyPath locates the agy binary, honoring an explicit override before
+// ResolveAgyPath locates the agy binary, honoring an explicit override before
 // falling back to PATH and well-known install locations.
-func resolveAgyPath() (string, error) {
+func ResolveAgyPath() (string, error) {
 	binName := "agy"
 	if runtime.GOOS == "windows" {
 		binName = "agy.exe"
@@ -182,6 +212,42 @@ func (r *AntigravityCLIRunner) Fetch(ctx context.Context) (*AntigravitySnapshot,
 	return snap, nil
 }
 
+// FetchUserStatus ensures a ready agy session and returns the raw
+// GetUserStatus body. The sidecar bridge serves this payload to onWatch so a
+// second account can be polled without changing the core daemon.
+func (r *AntigravityCLIRunner) FetchUserStatus(ctx context.Context) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.ensureLocked(ctx); err != nil {
+		r.recordFailureLocked()
+		return nil, err
+	}
+
+	body, status, err := r.post(ctx, r.sess.conn, agyUserStatusRPC)
+	if err != nil || status != http.StatusOK {
+		r.recordFailureLocked()
+		if err == nil {
+			err = fmt.Errorf("antigravity cli: user status returned status %d", status)
+		}
+		return nil, err
+	}
+
+	var resp AntigravityUserStatusResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		r.recordFailureLocked()
+		return nil, fmt.Errorf("%w: %v", ErrAntigravityInvalidResponse, err)
+	}
+	if resp.UserStatus == nil {
+		return nil, ErrAntigravityNotAuthenticated
+	}
+
+	r.failures = 0
+	r.lastUsed = time.Now()
+	r.startWatchdog()
+	return body, nil
+}
+
 // ensureLocked guarantees a live, responsive session, relaunching if needed.
 // Caller must hold r.mu.
 func (r *AntigravityCLIRunner) ensureLocked(ctx context.Context) error {
@@ -190,9 +256,13 @@ func (r *AntigravityCLIRunner) ensureLocked(ctx context.Context) error {
 	}
 	r.teardownLocked()
 
-	binPath, err := resolveAgyPath()
-	if err != nil {
-		return err
+	binPath := r.binaryPath
+	if binPath == "" {
+		var err error
+		binPath, err = ResolveAgyPath()
+		if err != nil {
+			return err
+		}
 	}
 
 	sess, err := r.launch(binPath)
@@ -227,6 +297,21 @@ func agyLaunchArgs(csrfToken string) []string {
 	return []string{"--csrf_token", csrfToken}
 }
 
+// agyLaunchEnvironment merges inherited variables with per-launch overrides.
+// os/exec keeps the last value for a duplicated key, so appended overrides win;
+// on Windows that comparison is case-insensitive.
+func agyLaunchEnvironment(base []string, overrides map[string]string) []string {
+	env := make([]string, 0, len(base)+len(overrides)+1)
+	env = append(env, base...)
+	for k, v := range overrides {
+		env = append(env, k+"="+v)
+	}
+	if _, ok := overrides["TERM"]; !ok {
+		env = append(env, "TERM=xterm-256color")
+	}
+	return env
+}
+
 // launch starts agy inside a pseudo-terminal and drains its output.
 func (r *AntigravityCLIRunner) launch(binPath string) (*agySession, error) {
 	token, err := newAgyCSRFToken()
@@ -238,7 +323,7 @@ func (r *AntigravityCLIRunner) launch(binPath string) (*agySession, error) {
 		return nil, fmt.Errorf("antigravity cli: open pty: %w", err)
 	}
 	cmd := p.CommandContext(r.rootCtx, binPath, agyLaunchArgs(token)...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = agyLaunchEnvironment(os.Environ(), r.launchEnv)
 	if err := cmd.Start(); err != nil {
 		_ = p.Close()
 		return nil, fmt.Errorf("antigravity cli: start agy: %w", err)
