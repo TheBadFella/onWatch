@@ -70,11 +70,95 @@ install locations (`~/.local/bin/agy`, `/opt/homebrew/bin/agy`,
 ## Multiple accounts
 
 onWatch launches one managed `agy` process in the default environment. The
-installed CLI help and current runner expose no verified way to select an
-independent authenticated profile. Running two onWatch
+installed CLI help and current runner expose no profile-selection flag.
+Running two onWatch
 accounts against the same local server would therefore read the same Google
 account, so onWatch does not invent CLI profile flags or swap shared
 credentials.
+
+### Track a second account with the agy-bridge sidecar
+
+`agy-bridge` is a small standalone sidecar that emulates the Antigravity
+language server's `GetUserStatus` endpoint for one additional account. It runs
+its own managed `agy` process with an isolated profile directory, so Account 2's
+credentials never touch Account 1's environment or onWatch's daemon.
+
+Build it with the normal build target (it produces `./agy-bridge` next to
+`./onwatch`):
+
+```bash
+./app.sh --build
+```
+
+Sign in once inside the isolated profile before starting the bridge. The bridge
+runs `agy` non-interactively, so it cannot complete a first-time login for you.
+
+Linux/macOS:
+
+```bash
+export HOME="$HOME/.onwatch/antigravity-account2"
+export XDG_CONFIG_HOME="$HOME/.config"
+agy
+# Complete Google sign-in for Account 2, then exit without sending a prompt.
+```
+
+Windows PowerShell:
+
+```powershell
+$profileDir = "$env:USERPROFILE\.onwatch\antigravity-account2"
+$env:USERPROFILE = $profileDir
+$env:APPDATA = "$profileDir\AppData\Roaming"
+$env:LOCALAPPDATA = "$profileDir\AppData\Local"
+agy
+# Complete Google sign-in for Account 2, then exit without sending a prompt.
+```
+
+Start the bridge with the same profile directory:
+
+```bash
+./agy-bridge --port 43117 --profile-dir "$HOME/.onwatch/antigravity-account2" --account-name "Account 2"
+```
+
+On Windows, pass the same path you used for the sign-in, for example
+`--profile-dir "$env:USERPROFILE\.onwatch\antigravity-account2"`.
+
+The bridge prints the values onWatch needs:
+
+```
+agy-bridge base_url: http://127.0.0.1:43117
+agy-bridge csrf_token: <64 hex chars>
+```
+
+Add the account in **Settings -> Providers -> Antigravity -> Accounts -> +
+Add Account** with:
+
+| Field | Value |
+|-------|-------|
+| `base_url` | The printed `http://127.0.0.1:<port>` URL. |
+| `csrf_token` | The printed token (or the value passed to `--csrf-token`). |
+| `expected_email` | Account 2's Google email, so a misconfigured bridge cannot report the wrong account. |
+
+Flags:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--port` | `0` | Listen port on `127.0.0.1`; `0` picks a free port. |
+| `--account-name` | empty | Local label used in the bridge log output. |
+| `--profile-dir` | empty | Isolated profile for this account's `agy` credentials. |
+| `--csrf-token` | generated | Token clients must send in `X-Codeium-Csrf-Token`. |
+| `--agy-path` | auto-detected | Explicit `agy` binary path. |
+
+Safety notes:
+
+- The bridge caches a successful upstream response for 45 seconds and serves
+  it to every poll in that window. Do not lower this or run multiple bridges
+  against one profile; rapid polling is what triggers upstream rate limits and
+  account locks.
+- Only the bridge's own managed `agy` process is started and stopped. Your
+  interactive `agy` sessions are untouched.
+- Never point two bridges, or a bridge and onWatch's default CLI source, at the
+  same profile directory.
+- SIGINT/SIGTERM shuts the bridge down and reaps its managed `agy` process.
 
 The supported way to track more than one Antigravity account is an explicit,
 separately authenticated bridge endpoint per account. Each account stores:

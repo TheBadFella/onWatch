@@ -195,6 +195,9 @@ function patchOverviewNode(current, next) {
     return;
   }
   if (current.nodeType !== 1) return;
+  // Chart.js owns the canvas size and style attributes; rewriting them from a
+  // template would blank the drawn chart on every poll.
+  if (current.nodeName === 'CANVAS') return;
   for (const attr of [...current.attributes]) {
     if (attr.name === 'open' && current.matches('details.reset-credit-details')) continue;
     if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);

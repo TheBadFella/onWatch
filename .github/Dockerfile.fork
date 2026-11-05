@@ -6,6 +6,7 @@ RUN apk add --no-cache ca-certificates tzdata libstdc++ libgcc iproute2 && \
     mkdir -p /data && chown 65532:65532 /data
 WORKDIR /app
 COPY --chmod=0755 dist/onwatch-linux-amd64 /app/onwatch
+COPY --chmod=0755 dist/agy-bridge-linux-amd64 /usr/local/bin/agy-bridge
 ENV ONWATCH_DB_PATH=/data/onwatch.db \
     ONWATCH_PORT=9211 \
     ONWATCH_LOG_LEVEL=info

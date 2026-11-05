@@ -172,6 +172,7 @@ do_deps() {
 do_clean() {
     info "Cleaning build artifacts..."
     rm -f "$SCRIPT_DIR/$BINARY"
+    rm -f "$SCRIPT_DIR/agy-bridge"
     rm -f "$SCRIPT_DIR/coverage.out" "$SCRIPT_DIR/coverage.html"
     rm -rf "$SCRIPT_DIR/dist/"
     go clean -testcache
@@ -179,9 +180,18 @@ do_clean() {
 }
 
 do_build() {
-    info "Building onWatch v${VERSION}..."
+    info "Building onWatch v${VERSION} and agy-bridge..."
     build_native_binary "$SCRIPT_DIR/$BINARY"
-    success "Built ./$BINARY ($(du -h "$BINARY" | cut -f1 | xargs))"
+    build_bridge_binary "$SCRIPT_DIR/agy-bridge"
+    success "Built ./$BINARY ($(du -h "$BINARY" | cut -f1 | xargs)) and ./agy-bridge ($(du -h "$SCRIPT_DIR/agy-bridge" | cut -f1 | xargs))"
+}
+
+build_bridge_binary() {
+    local output="$1"
+    cd "$SCRIPT_DIR"
+    go build \
+        -ldflags="-s -w -X main.version=$VERSION" \
+        -o "$output" ./cmd/agy-bridge
 }
 
 build_native_binary() {
@@ -222,6 +232,12 @@ build_darwin() {
             -tags "$DARWIN_FULL_TAGS" \
             -ldflags="-s -w -X main.version=$VERSION" \
             -o "$SCRIPT_DIR/$output" ./cmd/onwatch
+
+        local bridge_output="dist/agy-bridge-darwin-${arch}"
+        info "Building ${bridge_output}..."
+        CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
+            -ldflags="-s -w -X main.version=$VERSION" \
+            -o "$SCRIPT_DIR/$bridge_output" ./cmd/agy-bridge
     done
 
     success "Built macOS binaries in dist/"
@@ -243,6 +259,7 @@ do_smoke() {
 
     info "  Build check..."
     build_native_binary /dev/null
+    build_bridge_binary /dev/null
 
     info "  Short tests..."
     go test -short -count=1 ./...
@@ -280,6 +297,12 @@ do_release() {
             -tags "$DESKTOP_TAGS" \
             -ldflags="-s -w -X main.version=$VERSION" \
             -o "$SCRIPT_DIR/$output" ./cmd/onwatch
+
+        local bridge_output="dist/agy-bridge-${os}-${arch}${ext}"
+        info "  Building ${bridge_output}..."
+        CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+            -ldflags="-s -w -X main.version=$VERSION" \
+            -o "$SCRIPT_DIR/$bridge_output" ./cmd/agy-bridge
     done
 
     success "Release build complete. Binaries in dist/:"
