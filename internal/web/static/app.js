@@ -13970,13 +13970,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (_) { /* non-critical: badges simply won't render until settings load */ }
   // Redirect to saved default provider if no explicit provider in URL
-  // Only when multiple providers are available (tabs exist)
+  // Only when multiple providers are available (tabs exist). When the All tab
+  // exists, opening onWatch always lands on it (the server lists it first).
   const urlParams = new URLSearchParams(window.location.search);
   const providerTabs = document.getElementById('provider-tabs');
-  if (!urlParams.has('provider') && providerTabs) {
+  const tabKeys = providerTabs ? [...providerTabs.querySelectorAll('.provider-tab')].map(t => t.dataset.provider) : [];
+  if (!urlParams.has('provider') && providerTabs && !tabKeys.includes('both')) {
     const savedProvider = loadDefaultProvider();
     if (savedProvider) {
-      const availableProviders = [...providerTabs.querySelectorAll('.provider-tab')].map(t => t.dataset.provider);
+      const availableProviders = tabKeys;
       // Only redirect if saved provider is available and different from server default
       if (availableProviders.includes(savedProvider) && savedProvider !== availableProviders[0]) {
         window.location.href = `${BASE_PATH}/?provider=${savedProvider}`;

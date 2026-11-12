@@ -11,7 +11,7 @@ func TestOrderDashboardProviders(t *testing.T) {
 	t.Parallel()
 	available := []string{"anthropic", "zai", "codex", "both"}
 	got := orderDashboardProviders(available, []string{"zai", "missing", "anthropic", "zai"})
-	want := []string{"zai", "anthropic", "codex", "both"}
+	want := []string{"both", "zai", "anthropic", "codex"}
 	if len(got) != len(want) {
 		t.Fatalf("len=%d want %d: %v", len(got), len(want), got)
 	}
@@ -28,8 +28,24 @@ func TestOrderDashboardProviders_NewProviderBeforeBoth(t *testing.T) {
 	available := []string{"anthropic", "zai", "codex", "antigravity", "gemini", "grok", "both"}
 	preferred := []string{"codex", "anthropic", "zai", "antigravity", "gemini", "both"}
 	got := orderDashboardProviders(available, preferred)
-	// grok must not land after both
-	want := []string{"codex", "anthropic", "zai", "antigravity", "gemini", "grok", "both"}
+	// The All tab always leads; grok joins the regular providers.
+	want := []string{"both", "codex", "anthropic", "zai", "antigravity", "gemini", "grok"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}
+
+func TestOrderDashboardProviders_AllTabFirstIntegrationsLast(t *testing.T) {
+	t.Parallel()
+	available := []string{"anthropic", "codex", "api-integrations", "both"}
+	// Even a saved order that put All last must not move it from the front.
+	got := orderDashboardProviders(available, []string{"codex", "api-integrations", "anthropic", "both"})
+	want := []string{"both", "codex", "anthropic", "api-integrations"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
