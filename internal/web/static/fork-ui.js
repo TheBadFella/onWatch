@@ -59,9 +59,13 @@ function accountConnectionHTML(account) {
   return `<div class="account-connection-info"><span class="account-connection-state" data-attention="${Boolean(needsAuth || account.isStale)}">${label}</span>${updated}</div>`;
 }
 
+// Runs every second: skip hidden tabs and only touch the DOM when the
+// minute-resolution text actually changes, so idle dashboards stay cheap.
 function updateOverviewCountdowns(now = Date.now()) {
+  if (typeof document.hidden === 'boolean' && document.hidden) return;
   document.querySelectorAll('[data-reset-deadline]').forEach(el => {
-    el.textContent = overviewResetText(Number(el.dataset.resetDeadline), now);
+    const text = overviewResetText(Number(el.dataset.resetDeadline), now);
+    if (el.textContent !== text) el.textContent = text;
   });
 }
 

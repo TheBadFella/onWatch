@@ -40,16 +40,16 @@ test('Antigravity "All accounts" enables the overview mode and drops the account
 });
 test('Antigravity overview quotas normalize CLI buckets and IDE model groups',()=>{
  const c=vm.createContext({});
- vm.runInContext(extract('accountOverviewQuotas'),c);
+ for (const name of ['quotaModeLabel','quotaUsedPercent','overviewQuotaRow','accountOverviewQuotas']) vm.runInContext(extract(name),c);
  const rows=c.accountOverviewQuotas('antigravity',{quotas:[
   {modelId:'gemini-5h',label:'Gemini 5h',usagePercent:42.5,remainingPercent:57.5,status:'warning',resetTime:'2026-11-05T12:00:00Z'},
   {quotaGroup:'claude-gpt',displayName:'Claude + GPT',usagePercent:80,status:'danger'},
   {usagePercent:10,remainingPercent:90,status:'healthy'},
  ]});
- assert.deepEqual(JSON.parse(JSON.stringify(rows[0])),{label:'Gemini 5h',quotaName:'gemini-5h',percent:42.5,status:'warning',resetAt:'2026-11-05T12:00:00Z',remaining:57.5});
- assert.deepEqual(JSON.parse(JSON.stringify(rows[1])),{label:'Claude + GPT',quotaName:'claude-gpt',percent:80,status:'danger',resetAt:null,remaining:20});
+ assert.deepEqual(JSON.parse(JSON.stringify(rows[0])),{label:'Gemini 5h',quotaName:'gemini-5h',resetAt:'2026-11-05T12:00:00Z',percent:42.5,status:'warning',caption:'Used · 57.5% left'});
+ assert.deepEqual(JSON.parse(JSON.stringify(rows[1])),{label:'Claude + GPT',quotaName:'claude-gpt',resetAt:null,percent:80,status:'danger',caption:'Used · 20.0% left'});
  assert.equal(rows[2].label,'Quota');
- assert.equal(rows[2].remaining,90);
+ assert.equal(rows[2].caption,'Used · 90.0% left');
 });
 function buildAllEntries(current,insights,history,configuredOrder){
  const State={allProvidersCurrent:current,allProvidersInsights:insights,allProvidersHistory:history};

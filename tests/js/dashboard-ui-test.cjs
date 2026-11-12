@@ -40,11 +40,11 @@ test('compact Codex cards expose available capacity and reset countdowns', () =>
     formatCodexPlan:()=>'', codexAutoStartBadge:()=>'', codexUsageSourceNoteHTML:()=>'', escapeHTML:s=>String(s),
     formatResetTime:()=> 'Oct 21, 2:30 PM', codexResetSummaryHTML:()=>'<div class="reset-credit-summary">Banked resets</div>',
   });
-  vm.runInContext(app.slice(app.indexOf('function accountOverviewQuotas('), app.indexOf('// Build one compact, clickable summary card per account')), card);
+  vm.runInContext(app.slice(app.indexOf('function quotaModeLabel('), app.indexOf('// Build one compact, clickable summary card per account')), card);
   const html = card.accountOverviewCardHTML('codex', {accountId:4, name:'Fixture account', quotas:[{
     name:'five_hour', utilization:34, resetsAt:'2026-10-21T14:30:00Z',
   }]},0);
-  assert.match(html, /66.0% available/);
+  assert.match(html, /Used · 66.0% left/);
   assert.match(html, /data-reset-deadline/);
   assert.match(html, /Oct 21, 2:30 PM/);
   assert.match(html, /reset-credit-summary/);

@@ -548,15 +548,15 @@
             <div class="settings-divider"></div>
             <div class="settings-section">
                 <h3 class="settings-section-title">Quota Display</h3>
-                <p class="settings-section-desc">Choose whether quota cards show how much you've used or how much is left. Per-provider settings (e.g. Codex) override this global default.</p>
+                <p class="settings-section-desc">Choose whether every quota card shows how much you have used or how much is left. Each card's caption names the figure and gives the other one.</p>
                 <div class="settings-fields">
                     <div class="settings-field settings-field-half">
                         <label for="settings-display-mode">Display Mode</label>
                         <select id="settings-display-mode" class="settings-input">
-                            <option value="usage">Usage (% used)</option>
-                            <option value="available">Available (% remaining)</option>
+                            <option value="usage">Used (% used)</option>
+                            <option value="available">Remaining (% left)</option>
                         </select>
-                        <span class="settings-field-hint">Applies to all providers unless overridden in the per-provider settings.</span>
+                        <span class="settings-field-hint">Changing this switches every provider and clears per-provider overrides. Dollar balances without a known limit always show the amount left.</span>
                     </div>
                 </div>
             </div>

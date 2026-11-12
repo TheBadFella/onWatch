@@ -2265,9 +2265,7 @@ function renderAntigravityQuotaCards(quotas, containerId) {
     const statusId = `status-antigravity-${q.modelId}`;
     const resetId = `reset-antigravity-${q.modelId}`;
 
-    // Format the remaining percent (leave as-is - separate fallback computation)
-    const remainingPct = (q.remainingPercent || 0).toFixed(1);
-    const fractionText = q.cardPercent != null ? `${cardLabel}` : `${remainingPct}% remaining`;
+    const fractionText = quotaModeLabel(q.cardPercent != null && cardLabel === 'Remaining', quotaUsedPercent(q));
 
     return `<article class="quota-card antigravity-card" data-quota="${q.modelId}" data-provider="antigravity" role="button" tabindex="0" aria-label="View ${displayName} details" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
@@ -2354,11 +2352,7 @@ function updateAntigravityCard(quota) {
     }
   }
   if (fractionEl) {
-    // remainingPercent stays as-is - separate computation, not the display toggle
-    const remainingPct = (quota.remainingPercent || 0).toFixed(1);
-    fractionEl.textContent = quota.cardPercent != null
-      ? (quota.cardLabel || 'Usage')
-      : `${remainingPct}% remaining`;
+    fractionEl.textContent = quotaModeLabel(quota.cardPercent != null && quota.cardLabel === 'Remaining', quotaUsedPercent(quota));
   }
   if (statusEl) {
     const config = statusConfig[status] || statusConfig.healthy;
@@ -2403,9 +2397,7 @@ function renderGeminiQuotaCards(quotas, containerId) {
     const statusId = `status-gemini-${q.modelId}`;
     const resetId = `reset-gemini-${q.modelId}`;
 
-    // remainingPercent is a separate computation - leave as-is
-    const remainingPct = (q.remainingPercent || (q.remainingFraction != null ? q.remainingFraction * 100 : 0)).toFixed(1);
-    const fractionText = q.cardPercent != null ? cardLabel : `${remainingPct}% remaining`;
+    const fractionText = quotaModeLabel(q.cardPercent != null && cardLabel === 'Remaining', quotaUsedPercent(q));
 
     return `<article class="quota-card gemini-card" data-quota="${q.modelId}" data-provider="gemini" role="button" tabindex="0" aria-label="View ${displayName} details" style="animation-delay: ${i * 60}ms">
       <header class="card-header">
@@ -2503,11 +2495,7 @@ function updateGeminiCard(q) {
     }
   }
   if (fractionEl) {
-    // remainingPercent is a separate computation - leave as-is
-    const remainingPct = (q.remainingPercent || (q.remainingFraction != null ? q.remainingFraction * 100 : 0)).toFixed(1);
-    fractionEl.textContent = q.cardPercent != null
-      ? (q.cardLabel || 'Usage')
-      : `${remainingPct}% remaining`;
+    fractionEl.textContent = quotaModeLabel(q.cardPercent != null && q.cardLabel === 'Remaining', quotaUsedPercent(q));
   }
   if (statusEl) {
     const config = statusConfig[status] || statusConfig.healthy;
@@ -3970,7 +3958,9 @@ function startCountdowns() {
         data.timeUntilResetSeconds--;
         const el = document.getElementById(`countdown-${type}`);
         if (el) {
-          el.textContent = formatDuration(data.timeUntilResetSeconds);
+          // Avoid a DOM write (and style recalc) when the text is unchanged.
+          const text = formatDuration(data.timeUntilResetSeconds);
+          if (el.textContent !== text) el.textContent = text;
           el.classList.toggle('imminent', data.timeUntilResetSeconds < 1800);
         }
       }
@@ -4716,23 +4706,26 @@ function commandCodePercent(quota) {
 
 // commandCodeCardLabel formats the fraction line. The two rate-limit windows
 // are denominated in credits with two decimals (1.51 / 14.00), matching the
-// reference provider; the monthly card is a dollar balance.
+// reference provider; the monthly card is a dollar balance. In Remaining mode
+// (cardLabel "Remaining") the figures are what is left, not what was used.
 function commandCodeCardLabel(quota) {
-  if (quota.cardLabel) return quota.cardLabel;
   const name = quota.name || 'monthly';
   const used = quota.used || 0;
   const limit = quota.limit || 0;
+  const showingRemaining = quota.cardLabel === 'Remaining';
   if (name === 'monthly') {
     if (quota.limitUnknown || limit <= 0) {
       return commandCodeUsd(quota.remaining != null ? quota.remaining : used) + ' remaining';
     }
-    return commandCodeUsd(used) + ' / ' + commandCodeUsd(limit);
+    if (showingRemaining) return commandCodeUsd(Math.max(0, limit - used)) + ' / ' + commandCodeUsd(limit) + ' left';
+    return commandCodeUsd(used) + ' / ' + commandCodeUsd(limit) + ' used';
   }
   const credits = (v) => (Number(v) || 0).toFixed(2);
   if (limit <= 0) {
-    return credits(used) + ' credits';
+    return credits(used) + ' credits used';
   }
-  return credits(used) + ' / ' + credits(limit) + ' cr';
+  if (showingRemaining) return credits(Math.max(0, limit - used)) + ' / ' + credits(limit) + ' cr left';
+  return credits(used) + ' / ' + credits(limit) + ' cr used';
 }
 
 function commandCodeUsd(value) {
@@ -5195,42 +5188,64 @@ function minimaxWindowLabel(q) {
   return (model && model !== 'general') ? `${base} (${model})` : base;
 }
 
+// quotaModeLabel names the figure a card shows (used or remaining, per the
+// Quota Display setting) and gives the other one, so the two never look alike.
+function quotaModeLabel(showingRemaining, usedPct) {
+  const used = Math.max(0, Math.min(100, Number(usedPct) || 0));
+  return showingRemaining
+    ? `Remaining · ${used.toFixed(1)}% used`
+    : `Used · ${(100 - used).toFixed(1)}% left`;
+}
+
+// quotaUsedPercent reads the used percentage from an Antigravity or Gemini
+// quota, deriving it from the remaining fraction when only that is reported.
+function quotaUsedPercent(q) {
+  if (typeof q.usagePercent === 'number') return q.usagePercent;
+  if (typeof q.remainingPercent === 'number') return 100 - q.remainingPercent;
+  if (typeof q.remainingFraction === 'number') return 100 - q.remainingFraction * 100;
+  return 0;
+}
+
+// overviewQuotaRow resolves one compact row. The server marks remaining-mode
+// quotas with cardLabel "Remaining"; everything else shows the used figure.
+function overviewQuotaRow(base, q, usedPct) {
+  const used = typeof usedPct === 'number' ? usedPct : null;
+  const showingRemaining = q.cardLabel === 'Remaining' && typeof q.cardPercent === 'number';
+  const percent = showingRemaining ? q.cardPercent : (used === null ? 0 : used);
+  return {
+    ...base,
+    percent,
+    status: q.status || 'healthy',
+    caption: used === null ? '' : quotaModeLabel(showingRemaining, used),
+  };
+}
+
 // Normalize an account's quotas into compact {label, percent, status, resetAt}
-// rows, keeping only the windows the account actually reports.
+// rows, keeping only the windows the account actually reports. Every provider
+// honours the same Quota Display mode.
 function accountOverviewQuotas(provider, account) {
   if (provider === 'antigravity') {
     // Antigravity reports either agy CLI buckets or IDE logical model groups;
     // both use the same quota fields.
-    return (account.quotas || []).map(q => ({
+    return (account.quotas || []).map(q => overviewQuotaRow({
       label: q.displayName || q.label || q.modelId || q.quotaGroup || 'Quota',
       quotaName: q.modelId || q.quotaGroup || null,
-      percent: typeof q.usagePercent === 'number' ? q.usagePercent : 0,
-      status: q.status || 'healthy',
       resetAt: q.resetTime || null,
-      remaining: typeof q.remainingPercent === 'number'
-        ? q.remainingPercent
-        : (typeof q.usagePercent === 'number' ? Math.max(0, 100 - q.usagePercent) : null),
-    }));
+    }, q, quotaUsedPercent(q)));
   }
   if (provider === 'minimax') {
-    return (account.quotas || []).map(q => ({
+    return (account.quotas || []).map(q => overviewQuotaRow({
       label: minimaxWindowLabel(q),
       quotaName: q.name || null,
-      percent: typeof q.usagePercent === 'number' ? q.usagePercent : 0,
-      status: q.status || 'healthy',
       resetAt: q.resetAt || null,
-      remaining: typeof q.usagePercent === 'number' ? Math.max(0, 100 - q.usagePercent) : null,
-    }));
+    }, q, q.usagePercent));
   }
   const visible = filterCodexQuotasForPlan(account.quotas || [], account.planType);
-  return visible.map(q => ({
+  return visible.map(q => overviewQuotaRow({
     label: q.displayName || codexDisplayNames[q.name] || q.name,
     quotaName: q.name,
-    percent: typeof q.cardPercent === 'number' ? q.cardPercent : (q.utilization || 0),
-    status: q.status || 'healthy',
     resetAt: q.resetsAt || null,
-    remaining: typeof q.utilization === 'number' ? Math.max(0, 100 - q.utilization) : null,
-  }));
+  }, q, q.utilization));
 }
 
 // Build the HTML for a single compact account summary card.
@@ -5256,7 +5271,7 @@ function accountOverviewCardHTML(provider, account, idx) {
           <div class="progress-bar" role="progressbar" aria-valuenow="${Math.round(r.percent)}" aria-valuemin="0" aria-valuemax="100">
             <div class="progress-fill" style="width: ${pct}%" data-status="${r.status}"></div>
           </div>
-          ${r.remaining !== null ? `<div class="aoq-available">${r.remaining.toFixed(1)}% available</div>` : ''}
+          ${r.caption ? `<div class="aoq-available">${escapeHTML(r.caption)}</div>` : ''}
           <div class="aoq-reset-row">${overviewResetHTML(r.resetAt)}${reset ? `<span class="aoq-reset" data-reset-at="${escapeHTML(r.resetAt)}">${escapeHTML(reset)}</span>` : ''}</div>
         </div>`;
       }).join('');
@@ -12161,9 +12176,9 @@ const providerSettingsConfig = {
       { id: 'profiles_dir', label: 'Profiles Directory', type: 'text', placeholder: 'Auto-detected (default)', hint: 'Override the auto-detected Codex profiles directory. Leave blank to use the default.' },
       { id: 'display_mode', label: 'Quota Display', type: 'select', options: [
         { value: '', text: 'Use global default' },
-        { value: 'usage', text: 'Usage (show utilization %)' },
-        { value: 'available', text: 'Available (show remaining %)' },
-      ], default: '', noRestart: true, hint: 'Override the global Quota Display setting (Settings → General) for Codex only. Choose "Use global default" to follow the global setting.' },
+        { value: 'usage', text: 'Used (show % used)' },
+        { value: 'available', text: 'Remaining (show % left)' },
+      ], default: '', noRestart: true, hint: 'Override the global Quota Display setting (Settings → General) for Codex only. Changing the global setting clears this override.' },
       { id: 'pace_mode', label: 'Weekly Pace Mode', type: 'select', options: [
         { value: 'calendar', text: 'Calendar (7-day)' },
         { value: '6-day', text: '6-day (Mon-Sat)' },
@@ -13117,6 +13132,9 @@ function setupSettingsSave() {
           updateBrowserDefaultTimezoneText();
           refreshTimezoneSensitiveText();
         }
+        // A global Quota Display change clears per-provider overrides on the
+        // server; keep the modal state in step so it cannot resend them.
+        if (data.provider_settings) State.providerSettings = data.provider_settings;
         if (data.provider_visibility) State.providerVisibility = data.provider_visibility;
         if (data.api_integrations_visibility) State.apiIntegrationsVisibility = data.api_integrations_visibility;
         if (Array.isArray(data.dashboard_providers_order)) {

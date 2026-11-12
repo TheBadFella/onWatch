@@ -81,7 +81,7 @@ func TestApplyDisplayModeToQuotaMap_ClampsBelow0(t *testing.T) {
 
 func TestApplyDisplayModeToQuotaMap_PreservesExistingCardPercent(t *testing.T) {
 	t.Parallel()
-	// Codex sets cardPercent for code_review unconditionally; the helper must
+	// Codex sets cardPercent per quota in Remaining mode; the helper must
 	// not overwrite that value.
 	q := map[string]interface{}{
 		"utilization": 30.0,
