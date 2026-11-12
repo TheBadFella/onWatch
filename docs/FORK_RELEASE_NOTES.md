@@ -1,7 +1,6 @@
-## Fork 1.1.4
+## Fork 1.1.5
 
-- One Quota Display switch (Settings → General) now changes every provider between used and remaining, including the multi-account overview for Antigravity, MiniMax and Codex, and Codex Review Requests.
-- Changing the global Quota Display clears per-provider overrides, so no provider stays on the old mode.
-- Card captions name the figure shown and give the other one, for example "Used · 60.0% left" or "Remaining · 40.0% used". Command Code credits read "used" or "left".
-- Dollar balances without a known limit keep showing the amount left instead of a false "100% remaining".
-- Countdowns skip redundant updates and pause in hidden tabs.
+- Codex, MiniMax and Antigravity open on the All accounts overview whenever more than one account is linked. A single account picked from the menu applies until the page is reloaded.
+- Reset notifications judge timing first. A reset at or after its scheduled time is reported as a scheduled reset, even across a gap in monitoring. Only a reset that comes before its scheduled time is flagged as early.
+- Resets with no recorded schedule read "New usage window" instead of "cause unknown".
+- New `scripts/link-anthropic-docker.sh` links a Claude account to the container with a login that belongs to onWatch alone.
