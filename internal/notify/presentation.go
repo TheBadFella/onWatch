@@ -56,7 +56,7 @@ func resetCauseLabel(cause string) string {
 	case "early_unknown":
 		return "Early reset, cause unconfirmed"
 	default:
-		return "Reset detected, cause unknown"
+		return "New usage window"
 	}
 }
 
@@ -85,7 +85,7 @@ func usageChange(before, after *float64) string {
 
 func resetMessage(status QuotaStatus) string {
 	if status.Reset == nil {
-		return "A new usage window was detected. The reset cause was not recorded."
+		return "A new usage window started."
 	}
 	return resetCauseLabel(status.Reset.Cause) + ". " + status.Reset.Evidence
 }

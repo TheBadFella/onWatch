@@ -107,7 +107,7 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 	}
 	if payload.Event == EventReset {
 		title = "↻ " + context + " | Reset"
-		description = "A new usage window was detected. The cause was not recorded."
+		description = "A new usage window started."
 		if payload.Reset != nil {
 			description = resetCauseLabel(payload.Reset.Cause) + "."
 			details := "**Previously due:** " + discordTime(payload.Reset.PreviousResetAt) + "\n**Next due:** " + discordTime(payload.Reset.NextResetAt)

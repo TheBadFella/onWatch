@@ -291,23 +291,18 @@ async function loadCodexProfiles() {
   }
 }
 
-// Pick the default Codex selection on first load: honor a stored preference
-// ('all' or a specific account id); otherwise default to the aggregate "All
-// accounts" overview when more than one account exists.
+// pickDefaultAccount returns the account a multi-account provider opens on
+// when the page loads: the "All accounts" overview whenever more than one
+// account is linked, otherwise the only account. A single account picked from
+// the menu still applies for the rest of the visit, but the next load starts
+// on the overview again.
+function pickDefaultAccount(accounts, current) {
+  if (!Array.isArray(accounts) || accounts.length === 0) return current;
+  return accounts.length > 1 ? 'all' : accounts[0].id;
+}
+
 function applyDefaultCodexSelection() {
-  let stored = null;
-  try { stored = localStorage.getItem('onwatch-codex-account'); } catch (e) { stored = null; }
-  if (stored === 'all') { State.codexAccount = 'all'; return; }
-  const storedId = stored != null ? parseInt(stored, 10) : NaN;
-  if (!isNaN(storedId) && State.codexProfiles.find(p => p.id === storedId)) {
-    State.codexAccount = storedId;
-    return;
-  }
-  if (State.codexProfiles.length > 1) {
-    State.codexAccount = 'all';
-  } else if (State.codexProfiles.length === 1) {
-    State.codexAccount = State.codexProfiles[0].id;
-  }
+  State.codexAccount = pickDefaultAccount(State.codexProfiles, State.codexAccount);
 }
 
 function populateCodexProfileTabs() {
@@ -511,21 +506,8 @@ async function loadMiniMaxAccounts() {
   }
 }
 
-// Mirror of applyDefaultCodexSelection for MiniMax accounts.
 function applyDefaultMiniMaxSelection() {
-  let stored = null;
-  try { stored = localStorage.getItem('onwatch-minimax-account'); } catch (e) { stored = null; }
-  if (stored === 'all') { State.minimaxAccount = 'all'; return; }
-  const storedId = stored != null ? parseInt(stored, 10) : NaN;
-  if (!isNaN(storedId) && State.minimaxAccounts.find(a => a.id === storedId)) {
-    State.minimaxAccount = storedId;
-    return;
-  }
-  if (State.minimaxAccounts.length > 1) {
-    State.minimaxAccount = 'all';
-  } else if (State.minimaxAccounts.length === 1) {
-    State.minimaxAccount = State.minimaxAccounts[0].id;
-  }
+  State.minimaxAccount = pickDefaultAccount(State.minimaxAccounts, State.minimaxAccount);
 }
 
 function populateMiniMaxAccountTabs() {
@@ -686,15 +668,9 @@ async function loadAntigravityAccounts() {
     const data = await res.json();
     const activeAccounts = (data.accounts || []).filter(a => !a.deletedAt);
     State.antigravityAccounts = activeAccounts;
-    if (!activeAccounts.length) {
-      State.antigravityAccount = null;
-    } else if (State.antigravityAccount !== 'all') {
-      const stored = State.antigravityAccount;
-      if (stored == null || !activeAccounts.find(a => a.id === stored)) {
-        State.antigravityAccount = activeAccounts.length > 1 ? 'all' : activeAccounts[0].id;
-        saveAntigravityAccount(State.antigravityAccount);
-      }
-    }
+    State.antigravityAccount = activeAccounts.length
+      ? pickDefaultAccount(activeAccounts, State.antigravityAccount)
+      : null;
     populateAntigravityAccountMenu();
     updateAntigravityAccountVisibility();
   } catch (e) {
