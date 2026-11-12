@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Link an Anthropic (Claude) account to the onWatch fork container.
 #
-# Run on the Docker host, from the folder that holds your compose file:
-#   ./link-anthropic-docker.sh [path-to-onwatch-data] [container-name]
-# Defaults: ./onwatch-data and onwatch.
+# Run on the Docker host:
+#   bash link-anthropic-docker.sh [path-to-onwatch-data] [container-name]
+# Without a path, the folder mounted at /data in the container is used.
+# The container name defaults to onwatch.
 #
 # The fork image sets HOME=/data/antigravity, so onWatch reads
 # /data/antigravity/.claude/.credentials.json. This script logs Claude Code in
@@ -11,16 +12,30 @@
 # onWatch renews its tokens without logging out Claude Code anywhere else.
 set -euo pipefail
 
-DATA_DIR="${1:-./onwatch-data}"
+DATA_DIR="${1:-}"
 CONTAINER="${2:-onwatch}"
-CLAUDE_DIR="$DATA_DIR/antigravity/.claude"
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
 
-if [ ! -d "$DATA_DIR" ]; then
-  echo "Data folder $DATA_DIR not found. Pass the folder mounted at /data." >&2
+# Without a path, ask Docker which host folder the container mounts at /data.
+if [ -z "$DATA_DIR" ] || [ ! -d "$DATA_DIR" ]; then
+  found="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+  if [ -n "$found" ]; then
+    echo "Using the data folder mounted at /data in $CONTAINER: $found"
+    DATA_DIR="$found"
+  fi
+fi
+if [ -z "$DATA_DIR" ] || ! $SUDO test -d "$DATA_DIR"; then
+  echo "Could not find onWatch's data folder. Pass it as the first argument," >&2
+  echo "or the container name as the second if it is not \"$CONTAINER\" (see: docker ps)." >&2
   exit 1
 fi
+# A Docker-managed volume sits under a root-only folder; run as root there.
+if ! [ -x "$DATA_DIR" ] || ! [ -r "$DATA_DIR" ]; then
+  echo "$DATA_DIR is only readable by root. Re-run with: sudo bash $0 \"$DATA_DIR\" $CONTAINER" >&2
+  exit 1
+fi
+CLAUDE_DIR="$DATA_DIR/antigravity/.claude"
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "Installing Claude Code..."
