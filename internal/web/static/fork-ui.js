@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function codexResetCauseLabel(cause) {
-  return {scheduled:'Scheduled reset',banked_credit:'Banked reset used',early_unknown:'Early reset, cause unconfirmed'}[cause] || 'Reset detected, cause unknown';
+  return {scheduled:'Scheduled reset',banked_credit:'Banked reset used',early_unknown:'Early reset, cause unconfirmed'}[cause] || 'New usage window';
 }
 
 function codexResetHistoryHTML(accounts) {
@@ -306,7 +306,7 @@ function codexResetHistoryHTML(accounts) {
     const limits = group.resets.map(reset => ({five_hour:'5-hour limit',seven_day:'Weekly limit',code_review:'Code review limit'}[reset.quotaName] || reset.quotaName.replaceAll('_',' '))).join(' + ');
     return `<details class="reset-history-entry" data-reset-group="${escapeHTML(group.key)}"><summary><span><strong>${escapeHTML(group.name)}</strong><span class="reset-history-cause">${escapeHTML(causes)}</span><span>${escapeHTML(limits)}</span></span><time>${time(group.at)}</time></summary><div class="reset-history-details">` + group.resets.map(reset => {
       const label = {five_hour:'5-hour limit',seven_day:'Weekly limit',code_review:'Code review limit'}[reset.quotaName] || reset.quotaName.replaceAll('_',' ');
-      return `<div><h3>${escapeHTML(label)}</h3><dl><dt>Usage before / after</dt><dd>${percent(reset.beforePercent)} → ${percent(reset.afterPercent)} used</dd><dt>Previously due</dt><dd>${time(reset.previousResetAt)}</dd><dt>Next due</dt><dd>${time(reset.nextResetAt)}</dd></dl><p>${escapeHTML(reset.evidence || 'The cause was not recorded.')}</p></div>`;
+      return `<div><h3>${escapeHTML(label)}</h3><dl><dt>Usage before / after</dt><dd>${percent(reset.beforePercent)} → ${percent(reset.afterPercent)} used</dd><dt>Previously due</dt><dd>${time(reset.previousResetAt)}</dd><dt>Next due</dt><dd>${time(reset.nextResetAt)}</dd></dl><p>${escapeHTML(reset.evidence || 'A new usage window started.')}</p></div>`;
     }).join('') + '</div></details>';
   }).join('');
 }

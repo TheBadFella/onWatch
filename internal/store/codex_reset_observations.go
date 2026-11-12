@@ -22,26 +22,30 @@ type CodexResetObservation struct {
 	Evidence           string     `json:"evidence"`
 }
 
+// classify decides from timing first. A reset observed at or after the
+// previous window's scheduled end is on schedule, however long the gap between
+// polls. Only a reset seen before its scheduled end is early; a banked
+// redemption explains an early reset only when it is observed in a short
+// polling interval. Without a recorded schedule there is nothing to compare,
+// which is reported as a new window, not as a mystery.
 func (o *CodexResetObservation) classify() {
+	gap := o.PreviousObservedAt == nil || o.ObservedAt.Sub(*o.PreviousObservedAt) > 5*time.Minute
 	switch {
-	case o.PreviousObservedAt == nil || o.BeforePercent == nil || o.AfterPercent == nil:
-		o.Cause = "unknown"
-		o.Evidence = "The usage samples around this reset are unavailable, so its cause cannot be classified."
-	case o.ObservedAt.Sub(*o.PreviousObservedAt) > 5*time.Minute:
-		o.Cause = "unknown"
-		o.Evidence = "A monitoring gap of more than five minutes spans this reset. Timing or a credit change cannot be linked reliably to the reset."
-	case o.CreditRedeemedAt != nil:
-		o.Cause = "banked_credit"
-		o.Evidence = "The provider reported a banked reset changing to redeemed between these usage samples. The reset was observed in the same interval."
 	case o.PreviousResetAt == nil:
 		o.Cause = "unknown"
-		o.Evidence = "The previous scheduled reset time was not recorded, so the cause cannot be classified."
+		o.Evidence = "A new usage window started. The previous window's scheduled end was not recorded, so its timing cannot be compared."
 	case !o.ObservedAt.Before(o.PreviousResetAt.Add(-2 * time.Minute)):
 		o.Cause = "scheduled"
-		o.Evidence = "The reset was observed when the previous window was due to end. This classification is based on timing; the provider does not identify the actor."
+		o.Evidence = "The window reset when it was due to end."
+	case o.CreditRedeemedAt != nil && !gap:
+		o.Cause = "banked_credit"
+		o.Evidence = "The window reset before it was due, and a banked reset changed to redeemed in the same polling interval."
+	case gap:
+		o.Cause = "early_unknown"
+		o.Evidence = "The window reset before it was due. A gap in monitoring around the reset means a banked redemption cannot be linked to it; a provider-issued or manual reset cannot be distinguished."
 	default:
 		o.Cause = "early_unknown"
-		o.Evidence = "Usage reset before the previous scheduled time. No banked redemption was confirmed in this observation interval; a provider-issued or manual reset cannot be distinguished."
+		o.Evidence = "The window reset before it was due. No banked redemption was seen in this polling interval, so it was a provider-issued or manual reset."
 	}
 }
 

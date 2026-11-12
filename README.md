@@ -1,6 +1,6 @@
 # onWatch - personal fork
 
-[![Version](https://img.shields.io/badge/Version-v1.1.4-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.4)
+[![Version](https://img.shields.io/badge/Version-v1.1.5-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.5)
 
 This is my fork of [onllm-dev/onWatch](https://github.com/onllm-dev/onWatch), maintained for my own multi-account monitoring setup.
 The changes focus on the dashboard, account connections, subscription costs, reset visibility, and notifications.
