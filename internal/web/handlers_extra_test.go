@@ -11992,7 +11992,7 @@ func TestHandler_BuildCodexCurrent_AvailableMode_ClampsNegative(t *testing.T) {
 	}
 }
 
-func TestHandler_BuildCodexCurrent_CodeReviewAlwaysRemaining(t *testing.T) {
+func TestHandler_BuildCodexCurrent_CodeReviewUsageModeShowsUsed(t *testing.T) {
 	t.Parallel()
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -12006,7 +12006,7 @@ func TestHandler_BuildCodexCurrent_CodeReviewAlwaysRemaining(t *testing.T) {
 	}
 	s.InsertCodexSnapshot(snap)
 
-	// In "usage" mode, code_review should still show remaining
+	// In "usage" mode, code_review shows used like every other window.
 	cfg := createTestConfigWithCodex()
 	cfg.CodexShowAvailable = "usage"
 	h := NewHandler(s, nil, nil, nil, cfg)
@@ -12019,17 +12019,11 @@ func TestHandler_BuildCodexCurrent_CodeReviewAlwaysRemaining(t *testing.T) {
 
 	for _, q := range quotas {
 		if q["name"] == "code_review" {
-			cardPercent, hasCard := q["cardPercent"].(float64)
-			if !hasCard {
-				t.Fatal("code_review should ALWAYS have cardPercent regardless of display mode")
+			if _, hasCard := q["cardPercent"]; hasCard {
+				t.Fatalf("code_review should not carry cardPercent in usage mode, got %v", q["cardPercent"])
 			}
-			// 100 - 30 = 70
-			if cardPercent != 70.0 {
-				t.Errorf("code_review cardPercent = %f, want 70.0", cardPercent)
-			}
-			cardLabel, _ := q["cardLabel"].(string)
-			if cardLabel != "Remaining" {
-				t.Errorf("code_review cardLabel = %q, want %q", cardLabel, "Remaining")
+			if got := q["utilization"]; got != 30.0 {
+				t.Errorf("code_review utilization = %v, want 30", got)
 			}
 		}
 	}

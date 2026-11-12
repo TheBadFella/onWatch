@@ -8410,6 +8410,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				existing[k] = v
 			}
 		}
+		resetDisplayModeOverridesOnGlobalChange(provSettings, storedSettings, existing)
 		// Sanitize known enum fields before persisting
 		sanitizeProviderSettings(existing)
 		merged, _ := json.Marshal(existing)
@@ -9794,6 +9795,11 @@ func applyDisplayModeToQuotaMap(qMap map[string]interface{}, mode string) {
 	if _, exists := qMap["cardPercent"]; exists {
 		return
 	}
+	// An unknown-cap balance (Command Code monthly, Ollama) reports a
+	// placeholder utilization of 0; inverting it would claim 100% remaining.
+	if unknown, _ := qMap["limitUnknown"].(bool); unknown {
+		return
+	}
 	usagePercent, ok := readUsagePercent(qMap)
 	if !ok {
 		return
@@ -9808,6 +9814,39 @@ func applyDisplayModeToQuotaMap(qMap map[string]interface{}, mode string) {
 	qMap["cardPercent"] = remaining
 	qMap["cardLabel"] = "Remaining"
 	qMap["remainingPercent"] = remaining
+}
+
+// resetDisplayModeOverridesOnGlobalChange drops every per-provider
+// display_mode when a save changes the global Quota Display mode, so one
+// switch flips every provider. A save that resends the same global value
+// keeps overrides chosen afterwards. A missing stored value counts as "usage",
+// the default.
+func resetDisplayModeOverridesOnGlobalChange(incoming, stored, merged map[string]interface{}) {
+	incomingGlobal, _ := incoming["global"].(map[string]interface{})
+	next, _ := incomingGlobal["display_mode"].(string)
+	if next != "usage" && next != "available" {
+		return
+	}
+	prev := "usage"
+	if storedGlobal, ok := stored["global"].(map[string]interface{}); ok {
+		if v, ok := storedGlobal["display_mode"].(string); ok && (v == "usage" || v == "available") {
+			prev = v
+		}
+	}
+	if prev == next {
+		return
+	}
+	for key, raw := range merged {
+		if key == "global" {
+			continue
+		}
+		if _, explicit := incoming[key]; explicit {
+			continue
+		}
+		if m, ok := raw.(map[string]interface{}); ok {
+			delete(m, "display_mode")
+		}
+	}
 }
 
 // readUsagePercent looks up the usage percentage from a quota map. Different
@@ -9994,8 +10033,8 @@ func (h *Handler) buildCodexCurrentOK(accountID int64) (response map[string]inte
 			"lastUpdatedAt": latest.CapturedAt.Format(time.RFC3339),
 			"isStale":       stale,
 		}
-		// code_review always shows remaining; five_hour/seven_day show remaining when display_mode="available"
-		if normalizedName == "code_review" || (showAvailable && (normalizedName == "five_hour" || normalizedName == "seven_day")) {
+		// Every window follows the Quota Display mode, Review Requests included.
+		if showAvailable {
 			remaining := 100 - q.Utilization
 			if remaining < 0 {
 				remaining = 0

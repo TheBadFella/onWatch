@@ -2521,12 +2521,9 @@ func TestHandler_Current_WithCodexProvider(t *testing.T) {
 		if q["displayName"] != "Review Requests" {
 			t.Errorf("expected code_review displayName Review Requests, got %v", q["displayName"])
 		}
-		if q["cardLabel"] != "Remaining" {
-			t.Errorf("expected code_review cardLabel Remaining, got %v", q["cardLabel"])
-		}
-		cardPercent, ok := q["cardPercent"].(float64)
-		if !ok || cardPercent != 65.0 {
-			t.Errorf("expected code_review cardPercent 65.0, got %v", q["cardPercent"])
+		// Usage mode (the default): Review Requests shows used, like every window.
+		if _, ok := q["cardPercent"]; ok {
+			t.Errorf("expected no code_review cardPercent in usage mode, got %v", q["cardPercent"])
 		}
 		if q["status"] != "healthy" {
 			t.Errorf("expected code_review status healthy, got %v", q["status"])
