@@ -18,7 +18,12 @@ func TestCodexResetObservations(t *testing.T) {
 		{name: "observed banked redemption", cause: "banked_credit", redeemed: true},
 		{name: "old redeemed baseline is not evidence", cause: "early_unknown", baselineRedeemed: true},
 		{name: "disappearing credit is not evidence", cause: "early_unknown", missingCredit: true},
-		{name: "credit observed across monitoring gap", cause: "unknown", redeemed: true, longGap: true},
+		// An early reset stays early across a monitoring gap; the gap only means a
+		// banked redemption cannot be linked to it.
+		{name: "credit observed across monitoring gap", cause: "early_unknown", redeemed: true, longGap: true},
+		// A reset at or after its scheduled time is on schedule however long the
+		// gap between polls was.
+		{name: "due window across monitoring gap", cause: "scheduled", scheduled: true, longGap: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dbPath := ":memory:"
@@ -116,6 +121,14 @@ func TestCodexResetObservations(t *testing.T) {
 			}
 		})
 	}
+	t.Run("due window without usage samples", func(t *testing.T) {
+		due := time.Date(2026, 10, 22, 17, 0, 0, 0, time.UTC)
+		o := CodexResetObservation{ObservedAt: due.Add(40 * time.Minute), PreviousResetAt: &due}
+		o.classify()
+		if o.Cause != "scheduled" {
+			t.Fatalf("cause = %s, want scheduled", o.Cause)
+		}
+	})
 	t.Run("missing deadline", func(t *testing.T) {
 		o := CodexResetObservation{}
 		o.classify()
