@@ -105,9 +105,9 @@ func isDashboardSpecialTab(key string) bool {
 }
 
 // orderDashboardProviders reorders available keys using a saved preference list.
-// Unknown keys in order are dropped; available keys missing from order are inserted
-// before special tabs (api-integrations / both) so a new provider is never buried
-// after the All tab.
+// Unknown keys in order are dropped; available keys missing from order join the
+// regular providers. The All tab (both) always comes first, so it is also the
+// default tab, and API Integrations always comes last.
 func orderDashboardProviders(available, preferred []string) []string {
 	if len(available) == 0 {
 		return []string{}
@@ -144,27 +144,14 @@ func orderDashboardProviders(available, preferred []string) []string {
 		appendKey(k)
 	}
 
-	// Stable special order: api-integrations then both, regardless of discovery order.
-	specialOrder := []string{"api-integrations", "both"}
-	orderedSpecials := make([]string, 0, len(specials))
-	specialSeen := map[string]struct{}{}
-	for _, k := range specialOrder {
-		for _, s := range specials {
-			if s == k {
-				orderedSpecials = append(orderedSpecials, s)
-				specialSeen[s] = struct{}{}
-			}
-		}
+	out := make([]string, 0, len(regular)+len(specials))
+	if _, ok := seen["both"]; ok {
+		out = append(out, "both")
 	}
-	for _, s := range specials {
-		if _, ok := specialSeen[s]; !ok {
-			orderedSpecials = append(orderedSpecials, s)
-		}
-	}
-
-	out := make([]string, 0, len(regular)+len(orderedSpecials))
 	out = append(out, regular...)
-	out = append(out, orderedSpecials...)
+	if _, ok := seen["api-integrations"]; ok {
+		out = append(out, "api-integrations")
+	}
 	return out
 }
 
