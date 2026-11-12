@@ -16,10 +16,13 @@ DATA_DIR="${1:-}"
 CONTAINER="${2:-onwatch}"
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+# Use sudo for Docker when this user is not in the docker group.
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then DOCKER="$SUDO docker"; fi
 
 # Without a path, ask Docker which host folder the container mounts at /data.
 if [ -z "$DATA_DIR" ] || [ ! -d "$DATA_DIR" ]; then
-  found="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+  found="$($DOCKER inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
   if [ -n "$found" ]; then
     echo "Using the data folder mounted at /data in $CONTAINER: $found"
     DATA_DIR="$found"
@@ -65,9 +68,9 @@ chmod 700 "$CLAUDE_DIR_ABS"
 chmod 600 "$CLAUDE_DIR_ABS/.credentials.json"
 $SUDO chown -R 65532:65532 "$CLAUDE_DIR_ABS"
 echo "Credentials saved. Restarting $CONTAINER so onWatch detects them..."
-docker restart "$CONTAINER" >/dev/null
+$DOCKER restart "$CONTAINER" >/dev/null
 sleep 5
-if docker logs --since 1m "$CONTAINER" 2>&1 | grep -qi "anthropic"; then
+if $DOCKER logs --since 1m "$CONTAINER" 2>&1 | grep -qi "anthropic"; then
   echo "Anthropic is linked. Open the dashboard and pick the Anthropic tab."
 else
   echo "Restarted. If the Anthropic tab does not appear, run: docker logs $CONTAINER | grep -i anthropic"
