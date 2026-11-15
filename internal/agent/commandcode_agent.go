@@ -65,6 +65,14 @@ func (a *CommandCodeAgent) Run(ctx context.Context) error {
 		a.logger.Info("Command Code agent stopped")
 	}()
 
+	if a.notifier != nil && a.store != nil {
+		if latest, err := a.store.QueryLatestCommandCode(); err == nil && latest != nil {
+			for _, q := range latest.Quotas {
+				a.notifier.RememberUsage(notify.QuotaStatus{Provider: "commandcode", QuotaKey: q.Name, Utilization: q.Utilization, ResetAt: derefTime(q.ResetsAt)})
+			}
+		}
+	}
+
 	a.poll(ctx)
 
 	ticker := time.NewTicker(a.interval)

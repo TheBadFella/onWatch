@@ -28,6 +28,10 @@ type NotificationEngine struct {
 
 	// now is overridable in tests so cooldown behaviour is deterministic.
 	now func() time.Time
+
+	// exhausted records, per provider and account-scoped quota key, whether the
+	// latest reading was at 100%. Guarded by mu.
+	exhausted map[string]bool
 }
 
 // NotificationConfig holds threshold and delivery settings.
@@ -470,6 +474,7 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 		// Backward compatibility: legacy settings keyed by quota only.
 		override, hasOverride = cfg.Overrides[status.QuotaKey]
 	}
+	shortWindowBlocked := e.recordExhaustion(provider, status)
 	if status.ResetOccurred {
 		if err := e.store.ClearNotificationLog(provider, "starter:"+quotaKey); err != nil {
 			e.logger.Error("failed to clear starter failure on reset", "error", err)
@@ -477,7 +482,7 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 		if err := e.store.ClearNotificationLog(provider, quotaKey); err != nil {
 			e.logger.Error("failed to clear notification log on reset", "error", err)
 		}
-		if cfg.Types.Reset && !(hasOverride && override.DisableReset) {
+		if cfg.Types.Reset && !(hasOverride && override.DisableReset) && !shortWindowBlocked {
 			e.sendNotification(channels, policy, status, EventReset, 0)
 		}
 		return
@@ -491,7 +496,7 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 		e.sendNotification(eventChannels, repeatPolicy{}, status, EventExhausted, 100)
 	}
 	remaining := status.ResetAt.Sub(e.clock())
-	if !status.ResetAt.IsZero() && remaining > 0 && remaining <= cfg.ResetSoon &&
+	if !status.ResetAt.IsZero() && remaining > 0 && remaining <= cfg.ResetSoon && !shortWindowBlocked &&
 		(channels.emailEnabled(EventResetSoon) || channels.webhookEnabled(EventResetSoon)) {
 		e.sendNotification(eventChannels, repeatPolicy{}, status, EventResetSoon, 0)
 	}
@@ -528,6 +533,53 @@ func (e *NotificationEngine) Check(status QuotaStatus) {
 		e.sendNotification(channels, policy, status, EventWarning, warningThreshold)
 		return
 	}
+}
+
+// recordExhaustion remembers whether this quota is spent and reports whether
+// status is a 5-hour window whose account's weekly limit is spent. A new
+// 5-hour window gives no usable quota then, so its reset and reset-soon alerts
+// are noise. The weekly reading comes from the previous poll, since trackers
+// report resets before the poll's threshold checks run.
+func (e *NotificationEngine) recordExhaustion(provider string, status QuotaStatus) bool {
+	scoped := func(quotaKey string) string {
+		s := status
+		s.QuotaKey = quotaKey
+		return provider + "|" + notificationQuotaKey(s)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.exhausted == nil {
+		e.exhausted = make(map[string]bool)
+	}
+	e.exhausted[scoped(status.QuotaKey)] = !status.ResetOccurred && status.Utilization >= 100
+	for _, weekly := range weeklyQuotaKeys(status.QuotaKey) {
+		if e.exhausted[scoped(weekly)] {
+			return true
+		}
+	}
+	return false
+}
+
+// RememberUsage records a stored reading without evaluating any alert. Agents
+// call it at startup with their latest snapshot, so a reset detected on the
+// first poll after a restart still knows whether the weekly limit is spent. A
+// reading whose window has already reset is not taken as exhausted.
+func (e *NotificationEngine) RememberUsage(status QuotaStatus) {
+	status.ResetOccurred = !status.ResetAt.IsZero() && !status.ResetAt.After(e.clock())
+	e.recordExhaustion(normalizeNotificationProvider(status.Provider), status)
+}
+
+// weeklyQuotaKeys names the weekly quotas that gate a 5-hour window key:
+// five_hour pairs with seven_day (Codex, Anthropic) or weekly (Command Code),
+// and Antigravity's "<group>-5h" pairs with "<group>-weekly".
+func weeklyQuotaKeys(quotaKey string) []string {
+	switch {
+	case quotaKey == "five_hour":
+		return []string{"seven_day", "weekly"}
+	case strings.HasSuffix(quotaKey, "-5h"):
+		return []string{strings.TrimSuffix(quotaKey, "-5h") + "-weekly"}
+	}
+	return nil
 }
 
 // CheckCodexReset attaches persisted observations to the account-scoped reset.

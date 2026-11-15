@@ -166,6 +166,14 @@ func (a *AntigravityAgent) Run(ctx context.Context) error {
 		a.logger.Info("Antigravity agent stopped")
 	}()
 
+	if a.notifier != nil && a.store != nil {
+		if latest, err := a.store.QueryLatestAntigravity(a.accountID); err == nil && latest != nil {
+			for _, g := range api.GroupAntigravityModelsByLogicalQuota(latest.Models) {
+				a.notifier.RememberUsage(notify.QuotaStatus{Provider: "antigravity", AccountID: fmt.Sprintf("%d", a.accountID), QuotaKey: g.GroupKey, Utilization: (1.0 - g.RemainingFraction) * 100, ResetAt: derefTime(g.ResetTime)})
+			}
+		}
+	}
+
 	// Poll immediately on start
 	a.poll(ctx)
 

@@ -60,7 +60,7 @@ func (s *Store) InsertCommandCodeSnapshot(snapshot *api.CommandCodeSnapshot) (in
 			period_start, period_end, period_cost, period_requests, period_tokens, quota_count
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		snapshot.CapturedAt.Format(time.RFC3339Nano),
-		snapshot.RawJSON,
+		"", // raw_json: never read, see compactUnreadRawJSON
 		snapshot.AccountName,
 		snapshot.AccountID,
 		snapshot.OrgID,
@@ -97,6 +97,10 @@ func (s *Store) InsertCommandCodeSnapshot(snapshot *api.CommandCodeSnapshot) (in
 		); err != nil {
 			return 0, fmt.Errorf("failed to insert quota value %s: %w", q.Name, err)
 		}
+	}
+
+	if err := collapseRepeatedSnapshot(tx, commandCodeRun, snapshot.AccountID, snapshotID); err != nil {
+		return 0, err
 	}
 
 	if err := tx.Commit(); err != nil {

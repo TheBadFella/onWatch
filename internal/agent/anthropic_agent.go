@@ -280,6 +280,14 @@ func (a *AnthropicAgent) Run(ctx context.Context) error {
 		a.logger.Info("Anthropic agent stopped")
 	}()
 
+	if a.notifier != nil && a.store != nil {
+		if latest, err := a.store.QueryLatestAnthropic(); err == nil && latest != nil {
+			for _, q := range latest.Quotas {
+				a.notifier.RememberUsage(notify.QuotaStatus{Provider: "anthropic", QuotaKey: q.Name, Utilization: q.Utilization, ResetAt: derefTime(q.ResetsAt)})
+			}
+		}
+	}
+
 	// Poll immediately on start
 	a.poll(ctx)
 

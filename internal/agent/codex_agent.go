@@ -1077,6 +1077,14 @@ func (a *CodexAgent) Run(ctx context.Context) error {
 		a.logger.Info("Codex agent stopped")
 	}()
 
+	if a.notifier != nil && a.store != nil {
+		if latest, err := a.store.QueryLatestCodex(a.accountID); err == nil && latest != nil {
+			for _, q := range latest.Quotas {
+				a.notifier.RememberUsage(notify.QuotaStatus{Provider: "codex", QuotaKey: q.Name, AccountID: fmt.Sprintf("%d", a.accountID), Utilization: q.Utilization, ResetAt: derefTime(q.ResetsAt)})
+			}
+		}
+	}
+
 	a.poll(ctx)
 
 	ticker := time.NewTicker(a.interval)

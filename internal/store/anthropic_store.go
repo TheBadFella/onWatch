@@ -32,7 +32,7 @@ func (s *Store) InsertAnthropicSnapshot(snapshot *api.AnthropicSnapshot) (int64,
 	result, err := tx.Exec(
 		`INSERT INTO anthropic_snapshots (captured_at, raw_json, quota_count) VALUES (?, ?, ?)`,
 		snapshot.CapturedAt.Format(time.RFC3339Nano),
-		snapshot.RawJSON,
+		anthropicStoredRawJSON(snapshot.RawJSON),
 		len(snapshot.Quotas),
 	)
 	if err != nil {
@@ -56,6 +56,10 @@ func (s *Store) InsertAnthropicSnapshot(snapshot *api.AnthropicSnapshot) (int64,
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert quota value %s: %w", q.Name, err)
 		}
+	}
+
+	if err := collapseRepeatedSnapshot(tx, anthropicRun, nil, snapshotID); err != nil {
+		return 0, err
 	}
 
 	if err := tx.Commit(); err != nil {

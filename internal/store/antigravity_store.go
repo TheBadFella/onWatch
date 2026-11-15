@@ -70,7 +70,7 @@ func (s *Store) InsertAntigravitySnapshot(snapshot *api.AntigravitySnapshot, acc
 		snapshot.PlanName,
 		snapshot.PromptCredits,
 		snapshot.MonthlyCredits,
-		snapshot.RawJSON,
+		"", // raw_json: never read, see compactUnreadRawJSON
 		len(snapshot.Models),
 		source,
 	)
@@ -102,6 +102,10 @@ func (s *Store) InsertAntigravitySnapshot(snapshot *api.AntigravitySnapshot, acc
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert antigravity model value %s: %w", m.ModelID, err)
 		}
+	}
+
+	if err := collapseRepeatedSnapshot(tx, antigravityRun, acct, snapshotID); err != nil {
+		return 0, err
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -8662,9 +8662,12 @@ function processDataWithGaps(dataPoints, range = '6h') {
     gapThresholdMs = Math.max(gapThresholdMs, median * 3);
   }
 
+  // The store keeps only the first and newest snapshot of an unchanged run, so
+  // a long segment between equal values is a flat reading, not a gap.
+  const span = (a, b) => dataPoints[a].y === dataPoints[b].y ? 0 : getTime(dataPoints[b]) - getTime(dataPoints[a]);
   for (let i = 0; i < dataPoints.length; i++) {
-    const prevGap = i === 0 ? Infinity : getTime(dataPoints[i]) - getTime(dataPoints[i - 1]);
-    const nextGap = i === dataPoints.length - 1 ? Infinity : getTime(dataPoints[i + 1]) - getTime(dataPoints[i]);
+    const prevGap = i === 0 ? Infinity : span(i - 1, i);
+    const nextGap = i === dataPoints.length - 1 ? Infinity : span(i, i + 1);
 
     // Mark segment as gap
     if (nextGap > gapThresholdMs) {

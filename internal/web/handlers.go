@@ -10596,7 +10596,7 @@ func (h *Handler) buildAntigravityInsights(hidden map[string]bool, rangeDur time
 			Key:      "coverage",
 			Title:    "Coverage",
 			Metric:   formatDuration(dur),
-			Sublabel: fmt.Sprintf("%d polls", pollCount),
+			Sublabel: fmt.Sprintf("%d stored samples", pollCount), // repeated readings are collapsed, so not every poll
 			Severity: "info",
 		})
 	}

@@ -227,6 +227,9 @@ func New(dbPath string) (*Store, error) {
 	if err := s.createTables(); err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
+	if err := s.compactStorage(); err != nil {
+		return nil, fmt.Errorf("failed to compact storage: %w", err)
+	}
 
 	return s, nil
 }
@@ -638,7 +641,6 @@ func (s *Store) createTables() error {
 		-- Antigravity indexes
 		CREATE INDEX IF NOT EXISTS idx_antigravity_snapshots_captured ON antigravity_snapshots(captured_at);
 		CREATE INDEX IF NOT EXISTS idx_antigravity_model_values_snapshot ON antigravity_model_values(snapshot_id);
-		CREATE INDEX IF NOT EXISTS idx_antigravity_model_values_model_id ON antigravity_model_values(model_id);
 		CREATE INDEX IF NOT EXISTS idx_antigravity_model_values_model_snapshot ON antigravity_model_values(model_id, snapshot_id);
 		CREATE INDEX IF NOT EXISTS idx_antigravity_cycles_model_start ON antigravity_reset_cycles(model_id, cycle_start);
 		-- Account indexes are created after the columns are added in migrateSchema.
@@ -1220,7 +1222,8 @@ func (s *Store) migrateSchema() error {
 
 	// Ensure newer Antigravity indexes exist for grouped queries.
 	for _, stmt := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_antigravity_model_values_model_id ON antigravity_model_values(model_id)`,
+		// (model_id, snapshot_id) below serves model_id lookups; the single-column index only cost writes.
+		`DROP INDEX IF EXISTS idx_antigravity_model_values_model_id`,
 		`CREATE INDEX IF NOT EXISTS idx_antigravity_model_values_model_snapshot ON antigravity_model_values(model_id, snapshot_id)`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {

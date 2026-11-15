@@ -114,6 +114,26 @@ pollers, authentication pauses, and provider retry/backoff behavior still apply.
 Provider-side reporting can lag; this is near-real-time monitoring, not a stream
 of individual prompts or token events.
 
+## Stored history
+
+Most polls repeat the reading before them. For Codex, Antigravity, Command Code
+and Anthropic, onWatch keeps the first and newest snapshot of each unchanged run
+and drops the rows in between. Every value and the time it changed are kept, and
+no history is pruned by age. Charts draw the segment between two equal values as
+a solid line. A monitoring gap with no change in usage therefore looks the same
+as a flat period.
+
+These providers no longer store the raw provider response with each snapshot.
+Nothing read it, and it made up most of the database. Anthropic statusline rows
+keep theirs because their source marker is read.
+
+The first start of this build clears the old raw responses, collapses repeated
+snapshots already stored, and runs `VACUUM` once. Expect a few seconds of extra
+startup time on a large database. Later starts skip this work.
+
+While an account's weekly limit is at 100%, its 5-hour reset and reset-soon
+alerts are not sent, since a new 5-hour window gives no usable quota.
+
 ## Fast Linux image delivery
 
 Pushes to `main` publish the Linux AMD64 Alpine image through **Sync Upstream &

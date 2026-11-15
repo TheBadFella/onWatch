@@ -64,7 +64,7 @@ func (s *Store) InsertCodexSnapshot(snapshot *api.CodexSnapshot) (int64, error) 
 		creditsBalance,
 		resetCreditsCount,
 		applicableCreditsCount,
-		snapshot.RawJSON,
+		"", // raw_json: never read, see compactUnreadRawJSON
 		len(snapshot.Quotas),
 	)
 	if err != nil {
@@ -92,6 +92,10 @@ func (s *Store) InsertCodexSnapshot(snapshot *api.CodexSnapshot) (int64, error) 
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert codex quota value %s: %w", q.Name, err)
 		}
+	}
+
+	if err := collapseRepeatedSnapshot(tx, codexRun, accountID, snapshotID); err != nil {
+		return 0, err
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -499,7 +499,7 @@ func TestAntigravityStore_QueryAntigravityHistory(t *testing.T) {
 		snapshot := &api.AntigravitySnapshot{
 			CapturedAt: base.Add(time.Duration(i) * time.Hour),
 			Models: []api.AntigravityModelQuota{
-				{ModelID: "claude-4-5-sonnet", Label: "Claude 4.5 Sonnet", RemainingFraction: 0.8, RemainingPercent: 80, ResetTime: &resetTime},
+				{ModelID: "claude-4-5-sonnet", Label: "Claude 4.5 Sonnet", RemainingFraction: 0.8 - float64(i)/10, RemainingPercent: 80 - float64(i)*10, ResetTime: &resetTime}, // distinct: identical readings collapse
 			},
 		}
 		_, err := s.InsertAntigravitySnapshot(snapshot)
