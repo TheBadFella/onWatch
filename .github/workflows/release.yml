@@ -1,6 +1,17 @@
 name: Release
 
+# A push to main that changes VERSION tags fork-v<VERSION> and publishes it, so
+# every version bump gets a tag and a release. Manual runs republish an
+# existing tag. Both refuse to publish when VERSION, the tag and the heading of
+# docs/FORK_RELEASE_NOTES.md disagree. Rerunning an older tag also moves the
+# :alpine and :latest images to that build, so only rerun the newest release.
+
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
   workflow_dispatch:
     inputs:
       tag:
@@ -13,20 +24,62 @@ permissions:
   packages: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+          fetch-depth: 0
+      - name: Check version, tag and notes agree
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          tag="${INPUT_TAG:-fork-v$version}"
+          if [ "$tag" != "fork-v$version" ]; then
+            echo "::error::Tag $tag does not match VERSION $version."
+            exit 1
+          fi
+          heading=$(head -n 1 docs/FORK_RELEASE_NOTES.md | tr -d '\r')
+          if [ "$heading" != "## Fork $version" ]; then
+            echo "::error::docs/FORK_RELEASE_NOTES.md starts with '$heading'. Update it to '## Fork $version' with this version's notes."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Create the tag for a version bump
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if existing=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}"); then
+            if [ "$existing" != "$GITHUB_SHA" ]; then
+              echo "::error::$TAG already exists on $existing. Bump VERSION to a new number."
+              exit 1
+            fi
+            exit 0
+          fi
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+
   image:
+    needs: prepare
     uses: ./.github/workflows/fork-image.yml
     with:
-      ref: ${{ inputs.tag }}
+      ref: ${{ needs.prepare.outputs.tag }}
       release_artifact: true
     secrets: inherit
 
   release:
-    needs: image
+    needs: [prepare, image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: actions/download-artifact@v4
         with:
           name: onwatch-linux-amd64
@@ -38,7 +91,7 @@ jobs:
       - name: Publish Linux release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
         run: |
           cd dist
@@ -46,7 +99,7 @@ jobs:
           cd ..
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           printf 'Linux AMD64 fork build.\n\nContainer: `%s@%s`\n\nGuides: [Codex setup](https://github.com/%s/blob/%s/docs/CODEX_SETUP.md), [dashboard and image delivery](https://github.com/%s/blob/%s/docs/FORK_UI.md).\n' "$image" "$IMAGE_DIGEST" "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG" > notes.md
-          if [ -f docs/FORK_RELEASE_NOTES.md ]; then cat docs/FORK_RELEASE_NOTES.md >> notes.md; fi
+          cat docs/FORK_RELEASE_NOTES.md >> notes.md
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/* --clobber
             gh release edit "$RELEASE_TAG" --notes-file notes.md
