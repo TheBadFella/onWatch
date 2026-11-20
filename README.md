@@ -1,6 +1,6 @@
 # onWatch - personal fork
 
-[![Version](https://img.shields.io/badge/Version-v1.1.7-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.7)
+[![Version](https://img.shields.io/badge/Version-v1.1.8-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.8)
 
 This is my fork of [onllm-dev/onWatch](https://github.com/onllm-dev/onWatch), maintained for my own multi-account monitoring setup.
 The changes focus on the dashboard, account connections, subscription costs, reset visibility, and notifications.
@@ -28,6 +28,12 @@ This README covers the additions and changes in this fork.
 - Clearer sign-in, stale-data, and last-updated information on account cards.
 - Reorganized notification settings, collapsible delivery sections, and improved mobile forms.
 - Optional homepage connection prompts and dismissible SMTP setup reminders.
+
+## New in the upstream sync
+
+- [Zenmux](docs/ZENMUX_SETUP.md) tracks subscription quotas and model usage.
+- [Alibaba Token Plan](docs/ALIBABA_SETUP.md) tracks 5-hour, weekly, and monthly quotas across accounts.
+- [Cursor](docs/CURSOR_SETUP.md) supports enterprise usage reporting and improves OAuth token refresh handling.
 
 ## Subscription costs
 

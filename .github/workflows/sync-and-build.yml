@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       force_build:
-        description: 'Force Docker build even if no upstream changes'
+        description: 'Build the current main commit'
         type: boolean
         default: true
   push:
@@ -23,7 +23,7 @@ on:
       - '.github/workflows/sync-and-build.yml'
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 concurrency:
@@ -32,11 +32,9 @@ concurrency:
 
 jobs:
   sync:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
-      has_changes: ${{ steps.sync.outputs.has_changes }}
-      sha: ${{ steps.sync.outputs.sha }}
+      build: ${{ steps.check.outputs.build }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,36 +42,41 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync with upstream
-        id: sync
+      - name: Check upstream and select image builds
+        id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+          FORCE_BUILD: ${{ inputs.force_build }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/onllm-dev/onWatch.git || true
-          git fetch upstream main
-
-          BEHIND_COUNT=$(git rev-list HEAD..upstream/main --count)
-          echo "Commits behind upstream: $BEHIND_COUNT"
-
-          if [ "$BEHIND_COUNT" -gt 0 ]; then
-            echo "Merging upstream changes..."
-            git merge upstream/main --no-edit -m "chore(sync): merge upstream onllm-dev/onWatch updates"
-            git push origin main
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Already up to date with upstream."
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              if git diff --quiet "$BEFORE" "$GITHUB_SHA" -- VERSION; then
+                echo "build=true" >> "$GITHUB_OUTPUT"
+              else
+                status=$?
+                if [ "$status" != 1 ]; then exit "$status"; fi
+                echo "The Release workflow builds the image for a VERSION bump."
+              fi
+              ;;
+            schedule|workflow_dispatch)
+              git fetch --no-tags https://github.com/onllm-dev/onWatch.git refs/heads/main
+              behind=$(git rev-list --count HEAD..FETCH_HEAD)
+              if [ "$behind" -gt 0 ]; then
+                echo "::warning::Fork is $behind commits behind upstream. Merge upstream/main and run the checks before publishing a release."
+                echo "Fork is $behind commits behind upstream. Merge upstream/main before the next release." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "Already up to date with upstream." >> "$GITHUB_STEP_SUMMARY"
+              fi
+              if [ "$FORCE_BUILD" = true ]; then
+                echo "build=true" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+          esac
 
   build:
     needs: sync
-    if: |
-      always() &&
-      (github.event_name == 'push' ||
-       (needs.sync.result == 'success' &&
-        (needs.sync.outputs.has_changes == 'true' || inputs.force_build == true)))
+    if: needs.sync.outputs.build == 'true'
     uses: ./.github/workflows/fork-image.yml
     with:
-      ref: ${{ github.event_name == 'push' && github.sha || needs.sync.outputs.sha }}
+      ref: ${{ github.sha }}
     secrets: inherit

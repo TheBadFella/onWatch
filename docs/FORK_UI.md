@@ -137,9 +137,12 @@ alerts are not sent, since a new 5-hour window gives no usable quota.
 ## Fast Linux image delivery
 
 Pushes to `main` publish the Linux AMD64 Alpine image through **Sync Upstream &
-Build**. Scheduled runs still merge upstream changes first. The builder checks
-out the exact pushed or synced commit, restores Go's dependency/build cache,
-runs the dashboard control tests, and compiles through `app.sh --build`.
+Build**. When a push changes `VERSION`, the **Release** workflow owns that build.
+Scheduled runs report how far the fork is behind. Merge upstream locally so
+conflicts can be resolved and tested before pushing. The manual **Sync Upstream
+& Build** run can rebuild the current commit.
+The builder checks out the exact commit, restores Go's caches, runs the dashboard
+control tests, and compiles through `app.sh --build`.
 `.github/Dockerfile.fork` only packages that binary into Alpine. Its dedicated
 Docker ignore file sends only the binary as the build context. The upstream
 Dockerfile stays available for the original build flow.
@@ -158,9 +161,9 @@ only through the **CI** workflow's **Run workflow** action, with fail-fast enabl
 and a five-minute timeout per test package. Its job has a fifteen-minute limit.
 The extra CI success job has been removed; the Linux job reports its own result.
 
-The manual
-**Release** workflow accepts an existing tag, reuses the same image builder,
-and publishes the Linux AMD64 binary and checksum after the image is available.
+A push that changes `VERSION` starts **Release**. It creates the fork tag,
+builds the image, and publishes the Linux AMD64 binary and checksum. A manual
+run rebuilds the newest existing release tag and updates its assets.
 It does not wait for macOS, Windows, ARM emulation, desktop extensions, Homebrew,
 or a second container build. Rerunning it updates release assets without deleting
 the existing release.
