@@ -1,7 +1,5 @@
-## Fork 1.1.8
+## Fork 1.1.9
 
-- Sync with onWatch v2.14.17.
-- Track Zenmux subscription quotas and review usage by model, time interval, and endpoint.
-- Monitor Alibaba Token Plan quotas across accounts, with separate 5-hour, weekly, and monthly usage windows.
-- Track Cursor enterprise usage. OAuth refreshes write back to the credential store that supplied the token and preserve encrypted desktop credentials.
-- Scheduled upstream checks report pending commits for a local merge. Version bumps use a single workflow to build the image and publish the release.
+- Start Claude's five-hour window automatically with a short Haiku prompt. Enable the beta starter in **Settings → Providers → Anthropic** and use **Auto** or **API Only** usage tracking.
+- The starter skips accounts with exhausted weekly quota or usage credits enabled. Its cooldown survives daemon restarts.
+- The starter requires Claude Code on the daemon's PATH. The fork's Alpine image also searches `/data/antigravity/.local/bin` for a persistent installation.

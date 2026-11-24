@@ -60,6 +60,9 @@ type AnthropicAgent struct {
 	notifier     *notify.NotificationEngine
 	pollingCheck func() bool
 
+	autoStart5hEnabled  func() bool
+	startFiveHourWindow func(context.Context) error
+
 	// Auth failure rate limiting
 	authFailCount   int    // consecutive auth failures (401 or 403)
 	authPaused      bool   // true when polling is paused due to auth failures
@@ -150,6 +153,8 @@ func NewAnthropicAgent(client *api.AnthropicClient, store *store.Store, tr *trac
 		interval: interval,
 		logger:   logger,
 		sm:       sm,
+
+		startFiveHourWindow: client.StartFiveHourWindow,
 	}
 }
 
@@ -1070,6 +1075,8 @@ processResponse:
 		}
 		a.sm.ReportPoll(values)
 	}
+
+	a.maybeStartFiveHourWindow(ctx, *resp, now)
 
 	// Log poll completion
 	quotaCount := len(snapshot.Quotas)

@@ -13079,7 +13079,7 @@ function createAPIIntegrationsToggleRow(visibility, health) {
 const providerSettingsConfig = {
   anthropic: {
     title: 'Anthropic',
-    desc: 'Configure how onWatch collects Anthropic usage data. Changes take effect after daemon restart.',
+    desc: 'Configure Anthropic usage tracking and the five-hour starter.',
     fields: [
       { id: 'source', label: 'Data Source', type: 'select', options: [
         { value: 'auto', text: 'Auto (statusline + API fallback)' },
@@ -13092,6 +13092,10 @@ const providerSettingsConfig = {
         { value: 'on', text: 'On (skip OAuth refresh when CC is running)' },
         { value: 'off', text: 'Off (always attempt OAuth refresh)' },
       ], default: 'on', hint: 'When enabled, onWatch skips OAuth token refresh while Claude Code is running to prevent login disruption.' },
+      { id: 'auto_start_5h', label: 'Auto-start 5h window (Beta)', type: 'select', options: [
+        { value: 'off', text: 'Off' },
+        { value: 'on', text: 'On' },
+      ], default: 'off', noRestart: true, hint: 'Sends a short Haiku prompt when an API poll finds an unstarted window. Requires Claude Code on the daemon’s PATH and usage credits turned off.' },
     ],
   },
   codex: {

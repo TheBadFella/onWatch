@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,6 +10,30 @@ import (
 
 	"github.com/onllm-dev/onwatch/v2/internal/api"
 )
+
+const anthropicStarterNextAt = "anthropic_starter_next_at"
+
+// ClaimAnthropicStarter reserves an attempt before prompting Claude, including
+// across daemon restarts and when two daemons share the same database.
+func (s *Store) ClaimAnthropicStarter(ctx context.Context, now, until time.Time) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+		WHERE CAST(settings.value AS INTEGER) <= ?
+	`, anthropicStarterNextAt, until.Unix(), now.Unix())
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+// SetAnthropicStarterRetry shortens a reservation after a failed prompt.
+func (s *Store) SetAnthropicStarterRetry(ctx context.Context, reservedUntil, retryAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE settings SET value = ? WHERE key = ? AND CAST(value AS INTEGER) = ?",
+		retryAt.Unix(), anthropicStarterNextAt, reservedUntil.Unix())
+	return err
+}
 
 // AnthropicResetCycle represents an Anthropic quota reset cycle
 type AnthropicResetCycle struct {

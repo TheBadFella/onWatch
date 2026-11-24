@@ -1,6 +1,6 @@
 # Runtime-only package for the cached Linux build in fork-image.yml.
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata libstdc++ libgcc iproute2 && \
+RUN apk add --no-cache bash ca-certificates tzdata libstdc++ libgcc iproute2 && \
     addgroup -g 65532 -S nonroot && \
     adduser -u 65532 -S -G nonroot -h /app nonroot && \
     mkdir -p /data && chown 65532:65532 /data
@@ -24,5 +24,7 @@ ENV HOME=/data/antigravity \
     ANTIGRAVITY_ENABLED=true \
     ANTIGRAVITY_SOURCE=cli \
     ANTIGRAVITY_CLI_PATH=/usr/local/bin/agy
+# Let the service user install Claude Code in the persistent home directory.
+ENV PATH="${PATH}:${HOME}/.local/bin"
 USER nonroot
 ENTRYPOINT ["/app/onwatch"]

@@ -205,6 +205,28 @@ func TestUpdateSettings_UnchangedFullPayloadDoesNotRestart(t *testing.T) {
 	}
 }
 
+func TestUpdateSettings_AnthropicStarter(t *testing.T) {
+	h, db, controller := newReconcileHandler(t, &config.Config{AnthropicToken: "test-token"}, map[string]bool{"anthropic": true})
+	for _, value := range []string{"on", "off"} {
+		body := settingsBodyJSON(t, map[string]map[string]string{"anthropic": {"auto_start_5h": value}})
+		req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		h.UpdateSettings(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%s", rr.Code, rr.Body.String())
+		}
+		raw, err := db.GetSetting("provider_settings")
+		var settings map[string]map[string]string
+		if err != nil || json.Unmarshal([]byte(raw), &settings) != nil || settings["anthropic"]["auto_start_5h"] != value {
+			t.Fatalf("starter setting should be %q, got %s, %v", value, raw, err)
+		}
+	}
+	if containsString(controller.stopped, "anthropic") || containsString(controller.started, "anthropic") {
+		t.Fatal("changing the starter toggle should not restart the Anthropic agent")
+	}
+}
+
 // Codex always resends profiles_dir; a save that does not change it must not
 // restart the (shared-instance) Codex agent, and Codex is not runtime
 // restartable anyway.

@@ -1708,6 +1708,14 @@ func run() error {
 	}
 	if anthropicAg != nil {
 		anthropicAg.SetPollingCheck(func() bool { return isPollingEnabled("anthropic") })
+		anthropicAg.SetAutoStart5hCheck(func() bool {
+			raw, err := db.GetSetting("provider_settings")
+			if err != nil || raw == "" {
+				return false
+			}
+			var settings map[string]map[string]any
+			return json.Unmarshal([]byte(raw), &settings) == nil && settings["anthropic"]["auto_start_5h"] == "on"
+		})
 	}
 	if copilotAg != nil {
 		copilotAg.SetPollingCheck(func() bool { return isPollingEnabled("copilot") })

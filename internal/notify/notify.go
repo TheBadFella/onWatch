@@ -1100,7 +1100,7 @@ func (e *NotificationEngine) ConfigureWebhook() error {
 	return nil
 }
 
-// StarterEvent describes a Codex auto quota-starter outcome.
+// StarterEvent describes an auto quota-starter outcome.
 type StarterEvent struct {
 	Provider  string
 	QuotaKey  string

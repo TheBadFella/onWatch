@@ -1871,9 +1871,10 @@ var providerEnumFields = map[string]map[string][]string{
 		"auto_start_7d": {"off", "on"},
 	},
 	"anthropic": {
-		"display_mode": {"usage", "available"},
-		"source":       {"auto", "statusline", "api"},
-		"cc_detection": {"on", "off"},
+		"display_mode":  {"usage", "available"},
+		"source":        {"auto", "statusline", "api"},
+		"cc_detection":  {"on", "off"},
+		"auto_start_5h": {"off", "on"},
 	},
 	"copilot": {
 		"display_mode": {"usage", "available"},
