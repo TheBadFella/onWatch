@@ -76,6 +76,10 @@ func TestAnthropicStarterAfterSuccessfulPoll(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("starter fired %d times, want 1", calls)
 	}
+	status, err := db.GetStarterStatus("anthropic", "", "five_hour")
+	if err != nil || status.Result != "sent" || status.AttemptedAt == nil {
+		t.Fatalf("expected a sent request without confirmation: %+v, %v", status, err)
+	}
 	latest, err := db.QueryLatestAnthropic()
 	if err != nil || latest == nil || len(latest.Quotas) != 2 || latest.Quotas[0].ResetsAt != nil {
 		t.Fatalf("starter should preserve the observed quota snapshot, got %+v, %v", latest, err)
@@ -90,6 +94,17 @@ func TestAnthropicStarterAfterSuccessfulPoll(t *testing.T) {
 	restarted.poll(ctx)
 	if calls != 1 {
 		t.Fatal("starter fired again after restart")
+	}
+	observed := status.AttemptedAt.Add(time.Minute)
+	reset := status.AttemptedAt.Add(anthropicStarterWindow).Format(time.RFC3339)
+	var active api.AnthropicQuotaResponse
+	if err := json.Unmarshal([]byte(`{"five_hour":{"utilization":1,"resets_at":"`+reset+`"}}`), &active); err != nil {
+		t.Fatal(err)
+	}
+	restarted.maybeStartFiveHourWindow(ctx, active, observed)
+	confirmed, err := db.GetStarterStatus("anthropic", "", "five_hour")
+	if err != nil || confirmed.Result != "confirmed" || confirmed.ConfirmedAt == nil || !confirmed.ConfirmedAt.Equal(observed) || calls != 1 {
+		t.Fatalf("expected observed window after restart: %+v, calls=%d, %v", confirmed, calls, err)
 	}
 }
 

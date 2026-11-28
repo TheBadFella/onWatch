@@ -3875,6 +3875,17 @@ body.accounts-overview-mode #sessions-section {
 }
 
 /* Account summary cards mirror the product's .quota-card chrome. */
+.quota-readiness {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.quota-readiness p {
+  margin: 0 0 0.4rem;
+}
+
 .account-overview-card {
   display: flex;
   flex-direction: column;

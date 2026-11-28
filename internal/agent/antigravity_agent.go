@@ -266,7 +266,7 @@ func (a *AntigravityAgent) poll(ctx context.Context) {
 	// Log poll completion
 	for _, m := range snapshot.Models {
 		if m.RemainingFraction < 1.0 {
-			a.logger.Info("Antigravity poll complete",
+			a.logger.Debug("Antigravity poll complete",
 				"model", m.ModelID,
 				"label", m.Label,
 				"remainingPercent", m.RemainingPercent,

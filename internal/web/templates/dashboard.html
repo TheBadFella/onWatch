@@ -129,6 +129,7 @@
         <div class="quota-grid" id="quota-grid-copilot" data-provider="copilot"></div>
         {{else if eq .CurrentProvider "anthropic"}}
         <!-- Anthropic quota cards (dynamically populated by JS) -->
+        <div id="anthropic-starter-status" class="quota-readiness" hidden></div>
         <div class="quota-grid" id="quota-grid-anthropic" data-provider="anthropic"></div>
         {{else if eq .CurrentProvider "codex"}}
         <!-- Codex quota cards for selected profile (dynamically populated by JS) -->
@@ -136,6 +137,7 @@
             <div><h2 id="codex-selected-account-name" aria-live="polite">Codex accounts</h2><p id="codex-selected-account-id" hidden></p><p>Check usage, reset times, and accounts that need attention.</p></div>
             <button type="button" class="connect-primary" data-codex-connect>Connect account</button>
         </div>
+        <div id="codex-starter-status" class="quota-readiness" hidden></div>
         <div class="quota-grid" id="quota-grid-codex" data-provider="codex"></div>
         {{else if eq .CurrentProvider "antigravity"}}
         <!-- Antigravity quota cards (dynamically populated by JS) -->

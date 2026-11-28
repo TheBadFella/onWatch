@@ -698,7 +698,7 @@ func (a *AnthropicAgent) poll(ctx context.Context) {
 				}
 			}
 			a.pollCycleCount++
-			a.logger.Info("Anthropic poll complete",
+			a.logger.Debug("Anthropic poll complete",
 				"source", "statusline",
 				"quota_count", len(snapshot.Quotas),
 				"cycle", a.pollCycleCount)
@@ -1092,7 +1092,7 @@ processResponse:
 	// slot came due.
 	a.noteAPIPoll()
 
-	a.logger.Info("Anthropic poll complete",
+	a.logger.Debug("Anthropic poll complete",
 		"source", "api",
 		"quota_count", quotaCount,
 		"max_utilization", maxUtil,

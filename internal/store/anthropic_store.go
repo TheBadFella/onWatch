@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,18 @@ import (
 )
 
 const anthropicStarterNextAt = "anthropic_starter_next_at"
+
+func (s *Store) AnthropicStarterRetryAt() (time.Time, error) {
+	raw, err := s.GetSetting(anthropicStarterNextAt)
+	if err != nil || raw == "" {
+		return time.Time{}, err
+	}
+	unix, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(unix, 0), nil
+}
 
 // ClaimAnthropicStarter reserves an attempt before prompting Claude, including
 // across daemon restarts and when two daemons share the same database.

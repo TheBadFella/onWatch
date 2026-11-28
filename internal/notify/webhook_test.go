@@ -1066,7 +1066,7 @@ func TestStarterBatch_OneNotificationListsBothWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(embed), "5-hour limit, Weekly limit") || !strings.Contains(string(embed), "Windows started") {
+	if !strings.Contains(string(embed), "5-hour limit, Weekly limit") || !strings.Contains(string(embed), "Starter request sent") {
 		t.Fatalf("Discord embed = %s", embed)
 	}
 }

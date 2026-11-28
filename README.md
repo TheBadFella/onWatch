@@ -1,6 +1,6 @@
 # onWatch - personal fork
 
-[![Version](https://img.shields.io/badge/Version-v1.1.9-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.9)
+[![Version](https://img.shields.io/badge/Version-v1.1.10-blue)](https://github.com/TheBadFella/onWatch/releases/tag/fork-v1.1.10)
 
 This is my fork of [onllm-dev/onWatch](https://github.com/onllm-dev/onWatch), maintained for my own multi-account monitoring setup.
 The changes focus on the dashboard, account connections, subscription costs, reset visibility, and notifications.
@@ -72,6 +72,8 @@ See [webhook and notification setup](docs/WEBHOOK_SETUP.md) for event filters an
 In **Settings → Providers → Anthropic**, turn on **Auto-start 5h window (Beta)** to start Claude's five-hour window with a short Haiku prompt. The starter is off by default, takes effect on the next successful usage API poll, and uses a small amount of your subscription quota. It skips accounts with exhausted weekly quota or usage credits enabled.
 
 Install Claude Code where the onWatch daemon runs and make sure `claude` is on its PATH. The fork's Alpine image looks for it in `/data/antigravity/.local/bin`, which can persist on the `/data` mount. Use the **Auto** or **API Only** Anthropic data source so the starter receives an API reading. [Claude Code installation guide](https://code.claude.com/docs/en/setup)
+
+Set **Daily starter hours** in Codex or Anthropic settings to restrict automatic requests to a time range in the server's time zone. Codex profiles can override the provider schedule. The dashboard shows starter attempts, confirmed windows and why a starter is waiting. Codex account cards also show whether quota is available and when the most restrictive window resets.
 
 ## Antigravity and fork builds
 

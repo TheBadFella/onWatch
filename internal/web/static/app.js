@@ -5565,6 +5565,7 @@ async function fetchCurrent(onlyIfChanged = false) {
           data.quotas.forEach(q => updateCopilotCard(q));
         }
       } else if (provider === 'anthropic') {
+        updateQuotaReadiness('anthropic-starter-status', data);
         // Anthropic response: { capturedAt: ..., quotas: [...] }
         if (data.quotas) {
           const container = document.getElementById('quota-grid-anthropic');
@@ -5802,6 +5803,7 @@ async function fetchCodexUsage(options = {}) {
 
     const container = document.getElementById('quota-grid-codex');
     if (!container) return;
+    updateQuotaReadiness('codex-starter-status', payload);
 
     const renderedCount = container.querySelectorAll('.quota-card.codex-card').length;
     const sourceNote = payload.usageSourceNote || '';
@@ -5915,6 +5917,50 @@ function accountOverviewQuotas(provider, account) {
   }, q, q.utilization));
 }
 
+function quotaReadinessHTML(account) {
+  const labels = { five_hour: 'Five-hour', seven_day: 'Weekly' };
+  const states = {
+    ready: 'Quota available',
+    limited: 'Quota exhausted',
+    stale: 'Quota data is stale',
+    reconnect: 'Reconnect required',
+    disabled: 'Polling off',
+    unknown: 'Waiting for quota data',
+    awaiting_reset: 'Waiting for the first reading after reset',
+  };
+  const readiness = account.readiness;
+  const rows = [];
+  if (readiness && states[readiness.state]) {
+    const detail = [states[readiness.state]];
+    if (labels[readiness.binding]) {
+      detail.push(`${labels[readiness.binding]} limit`);
+      if (readiness.resetAt) detail.push(formatResetTime(readiness.resetAt));
+    }
+    if (readiness.observedAt) detail.push('Last reading ' + formatDateTime(readiness.observedAt));
+    rows.push(detail.join(' · '));
+  }
+  const outcomes = { sent: 'Request sent', confirmed: 'Request sent', failed: 'Request failed' };
+  for (const status of account.starterStatuses || []) {
+    const result = outcomes[status.result];
+    const detail = [`${labels[status.quota] || 'Quota'} starter`];
+    if (result) detail.push(result + (status.attemptedAt ? ' ' + formatDateTime(status.attemptedAt) : ''));
+    if (status.confirmedAt) detail.push('Window confirmed ' + formatDateTime(status.confirmedAt));
+    if (status.waiting) detail.push(status.waiting);
+    if (status.nextAt && Date.parse(status.nextAt) > Date.now()) detail.push('Next eligible ' + formatDateTime(status.nextAt));
+    if (detail.length === 1) detail.push('Waiting for an eligible window');
+    rows.push(detail.join(' · '));
+  }
+  return rows.map(row => `<p>${escapeHTML(row)}</p>`).join('');
+}
+
+function updateQuotaReadiness(id, account) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  const html = quotaReadinessHTML(account);
+  if (target.innerHTML !== html) target.innerHTML = html;
+  target.hidden = !html;
+}
+
 // Build the HTML for a single compact account summary card.
 function accountOverviewCardHTML(provider, account, idx) {
   const accountId = account.accountId || account.id || idx + 1;
@@ -5948,7 +5994,9 @@ function accountOverviewCardHTML(provider, account, idx) {
       <span class="account-overview-name">${escapeHTML(accountName)}</span>
       ${badge ? `<span class="account-overview-badge">${escapeHTML(badge)}</span>` : ''}
     </header>
-    ${accountConnectionHTML(account)}
+    ${provider === 'codex' && account.readiness
+      ? `<div class="quota-readiness">${quotaReadinessHTML(account)}</div>`
+      : accountConnectionHTML(account)}
     ${provider === 'codex' ? codexResetSummaryHTML(account.resetCredits) : ''}
     ${provider === 'codex' ? codexUsageSourceNoteHTML(account.usageSourceNote) : ''}
     <div class="account-overview-quotas">${quotaHTML}</div>
@@ -5962,6 +6010,7 @@ function accountOverviewCardHTML(provider, account, idx) {
 function renderAccountsOverview(provider, accounts) {
   const container = document.getElementById(`quota-grid-${provider}`);
   if (!container) return;
+  if (provider === 'codex') updateQuotaReadiness('codex-starter-status', {});
 
   if (!Array.isArray(accounts) || accounts.length === 0) {
     container.innerHTML = '<p class="empty-state">No account usage found yet.</p>';
@@ -13076,6 +13125,11 @@ function createAPIIntegrationsToggleRow(visibility, health) {
 
 // Configuration for each provider's settings fields.
 // Each entry defines the form fields shown in the modal.
+const starterScheduleField = {
+  id: 'starter_schedule', label: 'Daily starter hours', type: 'text', placeholder: '08:00-22:00', noRestart: true,
+  hint: 'Use HH:MM-HH:MM in the server’s time zone. Leave blank to allow starts at any hour.',
+};
+
 const providerSettingsConfig = {
   anthropic: {
     title: 'Anthropic',
@@ -13096,6 +13150,7 @@ const providerSettingsConfig = {
         { value: 'off', text: 'Off' },
         { value: 'on', text: 'On' },
       ], default: 'off', noRestart: true, hint: 'Sends a short Haiku prompt when an API poll finds an unstarted window. Requires Claude Code on the daemon’s PATH and usage credits turned off.' },
+      starterScheduleField,
     ],
   },
   codex: {
@@ -13121,6 +13176,7 @@ const providerSettingsConfig = {
         { value: 'off', text: 'Off' },
         { value: 'on', text: 'On' },
       ], default: 'off', noRestart: true, hint: 'Beta: when the weekly (7-day) window resets, onWatch sends a tiny Codex request to start the window so you keep the full reserve even if you do not use Codex right away. Consumes a small amount of quota. Applies on the next reset - no daemon restart needed.' },
+      starterScheduleField,
     ],
   },
   copilot: {
@@ -13359,6 +13415,17 @@ async function openProviderSettingsModal(providerKey) {
             html += `</div></div>`;
           });
           profilesList.innerHTML = html;
+          const scheduleFields = profiles.filter(profile => !profile.deletedAt).map(profile => {
+            const id = Number(profile.id);
+            const value = saved.starter_account_schedules?.[id] || '';
+            return `<div class="settings-field">
+              <label for="starter-hours-${id}">Starter hours for ${escapeHTML(profile.name)}</label>
+              <input type="text" id="starter-hours-${id}" class="settings-input" data-starter-account="${id}" value="${escapeHTML(value)}" placeholder="Use Codex starter hours" />
+            </div>`;
+          }).join('');
+          if (scheduleFields) {
+            bodyEl.insertAdjacentHTML('beforeend', `<div class="settings-fields">${scheduleFields}</div>`);
+          }
 
           // Attach event handlers to profile action buttons
           profilesList.querySelectorAll('.codex-profile-action-btn').forEach(btn => {
@@ -13887,6 +13954,12 @@ async function saveProviderSettings() {
       provData[f.id] = el.value.trim();
     }
   });
+  const accountSchedules = [...modal.querySelectorAll('[data-starter-account]')];
+  if (providerKey === 'codex' && accountSchedules.length > 0) {
+    provData.starter_account_schedules = Object.fromEntries(accountSchedules
+      .map(input => [input.dataset.starterAccount, input.value.trim()])
+      .filter(([, schedule]) => schedule));
+  }
 
   try {
     const payload = { provider_settings: { [providerKey]: provData } };
@@ -13902,7 +13975,8 @@ async function saveProviderSettings() {
     }
     const data = await res.json();
     // Determine restart requirement from the fields the user actually changed.
-    let anyChange = false;
+    let anyChange = provData.starter_account_schedules !== undefined &&
+      JSON.stringify(provData.starter_account_schedules) !== JSON.stringify(baseline.starter_account_schedules || {});
     let restartNeeded = false;
     config.fields.forEach(f => {
       if (provData[`clear_${f.id}`] === true) {

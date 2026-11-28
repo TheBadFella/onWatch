@@ -6940,6 +6940,9 @@ func (h *Handler) currentAnthropic(w http.ResponseWriter, r *http.Request) {
 // freshness information so the UI can show all quotas with age indicators.
 func (h *Handler) buildAnthropicCurrent() map[string]interface{} {
 	response, _, _ := h.buildAnthropicCurrentOK()
+	if h.store != nil {
+		response["starterStatuses"] = h.starterStatuses("anthropic", "")
+	}
 	return response
 }
 
@@ -8499,6 +8502,10 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "invalid provider_settings value")
 			return
 		}
+		if !validStarterSettings(provSettings) {
+			respondError(w, http.StatusBadRequest, "Enter starter hours as HH:MM-HH:MM in 24-hour time, with different start and end times.")
+			return
+		}
 		// An empty payload changes nothing: do not re-apply settings or touch
 		// any agent (the full-reconcile path would otherwise restart every
 		// runtime-restartable provider).
@@ -8537,7 +8544,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				// "<field>_cleared" marker so apply knows the empty value is
 				// intentional (and a legacy bare "" is not).
 				for fk, fv := range newMap {
-					if s, ok := fv.(string); ok && s == "" {
+					if s, ok := fv.(string); ok && s == "" && fk != "starter_schedule" {
 						if !clearedFields[k][fk] {
 							continue
 						}
@@ -10114,6 +10121,8 @@ func (h *Handler) buildCodexCurrentOK(accountID int64) (response map[string]inte
 		h.logger.Error("failed to query latest Codex snapshot", "error", err)
 		return response, false, false
 	}
+	response["readiness"] = h.codexAccountReadiness(accountID, latest, paused, now)
+	response["starterStatuses"] = h.starterStatuses("codex", strconv.FormatInt(accountID, 10))
 	if latest == nil {
 		return response, true, false
 	}

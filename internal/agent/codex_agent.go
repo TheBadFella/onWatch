@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -540,21 +541,32 @@ func (a *CodexAgent) maybeAutoStartWindows(ctx context.Context, quotas []api.Cod
 	// A ping in flight or finishing during the fetch may have started a window
 	// between the server's reading and now, so this poll is not comparable.
 	comparable := sp.gen%2 == 0 && a.starterGeneration() == sp.gen
+	account := strconv.FormatInt(a.accountID, 10)
 	var windows []string
 	for _, q := range quotas {
-		if codexAutoStartWindowSeconds(q.Name) == 0 {
+		seconds := codexAutoStartWindowSeconds(q.Name)
+		if seconds == 0 {
 			continue
 		}
 		// Record every managed window before any other check, so the next
 		// poll has a previous reset time to compare against.
+		prev, seen := a.starterSeen[q.Name]
 		rolling := a.resetRolling(q.Name, q.ResetsAt, sp, comparable)
+		if !comparable {
+			continue
+		}
 		if !rolling || !isUnstartedCodexWindow(q.Name, q.ResetsAt, now) {
+			if seen && prev.gen == sp.gen && q.ResetsAt != nil && q.ResetsAt.After(now) && q.ResetsAt.Equal(prev.resetsAt) {
+				observeStarterWindow(a.store, a.logger, "codex", account, q.Name, sp.fetchedAt, *q.ResetsAt, time.Duration(seconds)*time.Second)
+				recordStarterWait(a.store, a.logger, "codex", account, q.Name, "Window is active", *q.ResetsAt)
+			} else if q.ResetsAt == nil || !q.ResetsAt.After(now) {
+				recordStarterWait(a.store, a.logger, "codex", account, q.Name, "Waiting for quota data", time.Time{})
+			}
 			continue
 		}
-		if !a.autoStartCheck(q.Name) {
-			continue
+		if a.autoStartCheck(q.Name) {
+			windows = append(windows, q.Name)
 		}
-		windows = append(windows, q.Name)
 	}
 	if len(windows) == 0 {
 		return
@@ -563,15 +575,34 @@ func (a *CodexAgent) maybeAutoStartWindows(ctx context.Context, quotas []api.Cod
 	// 5-hour window cannot work while this account's weekly quota is exhausted.
 	for _, q := range quotas {
 		if q.Name == "seven_day" && q.Utilization >= 100 && (q.ResetsAt == nil || q.ResetsAt.After(now)) {
+			var next time.Time
+			if q.ResetsAt != nil {
+				next = *q.ResetsAt
+			}
+			for _, window := range windows {
+				recordStarterWait(a.store, a.logger, "codex", account, window, "Weekly quota exhausted", next)
+			}
 			a.sendStarterEvent(windows, false, "Weekly limit exhausted; no starter request was sent.")
 			return
 		}
+	}
+	if allowed, next := starterSchedule(configuredStarterSchedule(a.store, "codex", account), now.In(time.Local)); !allowed {
+		for _, window := range windows {
+			recordStarterWait(a.store, a.logger, "codex", account, window, scheduleWaitReason(next), next)
+		}
+		return
 	}
 	claimed, capped := a.claimStarter()
 	if capped {
 		a.logger.Info("Codex auto quota-starter skipped (rate cap reached)",
 			"quotas", windows, "account_id", a.accountID,
 			"max_fires", codexStarterMaxFires, "window", codexStarterRateWindow)
+		a.starterMu.Lock()
+		next := a.starterFires[0].Add(codexStarterRateWindow)
+		a.starterMu.Unlock()
+		for _, window := range windows {
+			recordStarterWait(a.store, a.logger, "codex", account, window, "Starter rate cap reached", next)
+		}
 	}
 	if !claimed {
 		return
@@ -1014,9 +1045,19 @@ func (a *CodexAgent) sendStarterPing(ctx context.Context, codexAccountID string,
 	a.logger.Info("Codex auto quota-starter firing",
 		"quotas", windows, "account_id", a.accountID, "model", api.CodexStarterModel())
 
+	attempted := a.currentTime()
 	pingCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	err := a.client.SendStarterPing(pingCtx, codexAccountID)
 	cancel()
+	if ctx.Err() == nil {
+		result := "sent"
+		if err != nil {
+			result = "failed"
+		}
+		for _, window := range windows {
+			recordStarterAttempt(a.store, a.logger, "codex", strconv.FormatInt(a.accountID, 10), window, result, attempted, time.Time{})
+		}
+	}
 	if finished != nil {
 		finished()
 	}
@@ -1336,7 +1377,7 @@ func (a *CodexAgent) poll(ctx context.Context) {
 	}
 
 	for _, q := range snapshot.Quotas {
-		a.logger.Info("Codex poll complete", "quota", q.Name, "utilization", q.Utilization, "plan", resp.PlanType, "account_id", a.accountID)
+		a.logger.Debug("Codex poll complete", "quota", q.Name, "utilization", q.Utilization, "plan", resp.PlanType, "account_id", a.accountID)
 	}
 }
 

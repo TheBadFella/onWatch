@@ -1,5 +1,6 @@
-## Fork 1.1.9
+## Fork 1.1.10
 
-- Start Claude's five-hour window automatically with a short Haiku prompt. Enable the beta starter in **Settings → Providers → Anthropic** and use **Auto** or **API Only** usage tracking.
-- The starter skips accounts with exhausted weekly quota or usage credits enabled. Its cooldown survives daemon restarts.
-- The starter requires Claude Code on the daemon's PATH. The fork's Alpine image also searches `/data/antigravity/.local/bin` for a persistent installation.
+- See when Codex and Claude starter requests were sent, whether a later quota reading confirmed the window, and why a starter is waiting.
+- Set optional daily starter hours for Codex and Claude. Codex profiles can override the provider's hours.
+- Compare Codex account readiness and get a dashboard alert when quota readings stay stale or an account needs to reconnect.
+- Move routine Codex, Claude and Antigravity poll logs to debug level.

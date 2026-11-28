@@ -2211,6 +2211,19 @@ func run() error {
 	}()
 
 	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				handler.CheckQuotaFreshness(ctx)
+			}
+		}
+	}()
+
+	go func() {
 		if !waitForServerReady(cfg.Port, 10*time.Second) {
 			return
 		}

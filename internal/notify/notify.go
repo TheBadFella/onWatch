@@ -1169,12 +1169,8 @@ func (e *NotificationEngine) SendStarterEvent(ev StarterEvent) {
 	title := fmt.Sprintf("[QUOTA STARTER] %s %s ping failed", context, limitLabel)
 	message := "The auto quota-starter ping did not complete."
 	if ev.Success {
-		title = fmt.Sprintf("[QUOTA STARTER] %s %s window started", context, limitLabel)
-		message = "OnWatch sent a small starter request to start the limit window. This is separate from the usage reset."
-		if len(pending) > 1 {
-			title = fmt.Sprintf("[QUOTA STARTER] %s windows started", context)
-			message = "OnWatch sent one small starter request for: " + limitLabel + ". This is separate from the usage reset."
-		}
+		title = fmt.Sprintf("[QUOTA STARTER] %s %s request sent", context, limitLabel)
+		message = "onWatch sent one small starter request for " + limitLabel + ". Check the dashboard for confirmation from a later quota reading."
 	}
 	blockedBy := ""
 	if !ev.Success && (strings.Contains(ev.Detail, "status code 429") || strings.Contains(ev.Detail, "Weekly limit exhausted")) {

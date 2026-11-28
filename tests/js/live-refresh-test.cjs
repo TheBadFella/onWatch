@@ -5,6 +5,22 @@ const path = require('node:path');
 const vm = require('node:vm');
 const app = fs.readFileSync(path.join(__dirname,'../../internal/web/static/app.js'),'utf8');
 const source = app.slice(app.indexOf('function startAutoRefresh()'), app.indexOf('// ── Pagination Helper'));
+
+test('starter rows distinguish the request and confirmation timestamps', () => {
+  const context = vm.createContext({
+    escapeHTML: String,
+    formatDateTime: value => value,
+    formatResetTime: value => 'Reset at ' + value,
+  });
+  vm.runInContext(app.slice(app.indexOf('function quotaReadinessHTML('), app.indexOf('function updateQuotaReadiness(')), context);
+  const html = context.quotaReadinessHTML({
+    readiness: {state: 'ready', binding: 'seven_day', resetAt: 'Friday'},
+    starterStatuses: [{quota: 'five_hour', result: 'confirmed', attemptedAt: '08:00', confirmedAt: '08:02'}],
+  });
+  assert.match(html, /Weekly limit · Reset at Friday/);
+  assert.match(html, /Request sent 08:00 · Window confirmed 08:02/);
+});
+
 function fixture() {
   let now=0, sequence=0;
   const calls={current:0,history:0,insights:0,cycles:0,overview:0,sessions:0};

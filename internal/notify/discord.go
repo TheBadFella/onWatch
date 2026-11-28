@@ -116,10 +116,7 @@ func formatDiscordEmbed(payload WebhookPayload) ([]byte, error) {
 		}
 	}
 	if payload.Event == EventStarterSuccess {
-		title = "▶ " + context + " | Window started"
-		if len(payload.QuotaKeys) > 1 {
-			title = "▶ " + context + " | Windows started"
-		}
+		title = "▶ " + context + " | Starter request sent"
 	}
 	if payload.Event == EventExhausted {
 		title = "🚨 " + context + " | Quota exhausted"
